@@ -31,7 +31,9 @@ function createWindow(): BrowserWindow {
 
   if (isDev) {
     void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
-    window.webContents.openDevTools({ mode: "detach" });
+    if (process.env.PI_APP_OPEN_DEVTOOLS !== "0") {
+      window.webContents.openDevTools({ mode: "detach" });
+    }
   } else {
     const indexPath = path.join(app.getAppPath(), "dist", "index.html");
     void window.loadURL(pathToFileURL(indexPath).toString());
@@ -59,9 +61,10 @@ function attachStatePublisher(window: BrowserWindow): void {
 app.setName("pi");
 
 app.whenReady().then(async () => {
+  const userDataDir = process.env.PI_APP_USER_DATA_DIR?.trim() || app.getPath("userData");
   store = new DesktopAppStore({
-    userDataDir: app.getPath("userData"),
-    initialWorkspacePaths: [process.cwd()],
+    userDataDir,
+    initialWorkspacePaths: resolveInitialWorkspacePaths(),
   });
   await store.initialize();
 
@@ -113,3 +116,15 @@ app.on("window-all-closed", () => {
     app.quit();
   }
 });
+
+function resolveInitialWorkspacePaths(): readonly string[] {
+  const raw = process.env.PI_APP_INITIAL_WORKSPACES;
+  if (raw !== undefined) {
+    return raw
+      .split(path.delimiter)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}

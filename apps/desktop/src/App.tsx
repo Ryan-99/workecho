@@ -351,6 +351,31 @@ export default function App() {
               </div>
             </footer>
           </>
+        ) : selectedWorkspace ? (
+          <section className="canvas canvas--empty">
+            <div className="canvas__hero">
+              <div className="hero__eyebrow">Workspace</div>
+              <h1>{selectedWorkspace.name}</h1>
+              <p>Create a thread for this folder, then jump between sessions from the sidebar.</p>
+              <div className="hero__badges">
+                <span className="badge badge--soft">{selectedWorkspace.path}</span>
+                <span className="badge badge--soft">{formatRelativeTime(selectedWorkspace.lastOpenedAt)}</span>
+              </div>
+              <div className="topbar__actions">
+                <button
+                  className="chip"
+                  type="button"
+                  onClick={() => {
+                    void updateSnapshot(api, setSnapshot, () =>
+                      api.createSession({ workspaceId: selectedWorkspace.id, title: "New thread" }),
+                    );
+                  }}
+                >
+                  New thread
+                </button>
+              </div>
+            </div>
+          </section>
         ) : (
           <section className="canvas canvas--empty">
             <div className="canvas__hero">

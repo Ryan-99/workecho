@@ -13,7 +13,7 @@
     "build:renderer": "vite build",
     "build:electron": "tsup electron/main.ts electron/preload.ts --format cjs --platform node --target node22 --out-dir dist-electron --external electron",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
-    "test": "playwright test",
+    "test": "pnpm build && playwright test tests/smoke.spec.ts",
     "start": "electron ."
   },
   "dependencies": {

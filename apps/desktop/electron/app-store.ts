@@ -1,11 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { randomUUID } from "node:crypto";
-import { PiSdkDriver, type PiSdkDriverConfig } from "@pi-app/pi-sdk-driver";
-import type {
-  SessionCatalogEntry,
-  WorkspaceCatalogEntry,
-} from "@pi-app/catalogs";
+import { PiSdkDriver, type PiSdkDriverConfig, type SessionTranscriptMessage } from "@pi-app/pi-sdk-driver";
+import type { SessionCatalogEntry, WorkspaceCatalogEntry } from "@pi-app/catalogs";
 import type { SessionDriverEvent, SessionRef, WorkspaceRef } from "@pi-app/session-driver";
 import {
   cloneDesktopAppState,
@@ -75,9 +72,7 @@ export class DesktopAppStore {
 
   subscribe(listener: StateListener): () => void {
     this.listeners.add(listener);
-    void this.getState()
-      .then((state) => listener(state))
-      .catch(() => undefined);
+    void this.getState().then(listener).catch(() => undefined);
     return () => {
       this.listeners.delete(listener);
     };
@@ -95,16 +90,16 @@ export class DesktopAppStore {
       return this.selectWorkspace(existing.id);
     }
 
-    const workspace = workspaceRefFromPath(normalizedPath);
     try {
-      const snapshot = await this.driver.createSession(workspace, {
-        title: `New thread`,
-      });
-      await this.ensureSessionSubscribed(snapshot.ref);
-      this.transcriptCache.set(sessionKey(snapshot.ref), []);
+      const synced = await this.driver.syncWorkspace(normalizedPath);
+      const firstSession = synced.sessions[0];
+      if (firstSession) {
+        await this.ensureSessionReady(firstSession.sessionRef);
+      }
+
       return this.refreshState({
-        selectedWorkspaceId: snapshot.ref.workspaceId,
-        selectedSessionId: snapshot.ref.sessionId,
+        selectedWorkspaceId: synced.workspace.workspaceId,
+        selectedSessionId: firstSession?.sessionRef.sessionId ?? "",
         composerDraft: "",
         clearLastError: true,
       });
@@ -120,9 +115,17 @@ export class DesktopAppStore {
       return this.emit();
     }
 
+    const firstSession = workspace.sessions[0];
+    if (firstSession) {
+      await this.ensureSessionReady({
+        workspaceId,
+        sessionId: firstSession.id,
+      });
+    }
+
     return this.refreshState({
       selectedWorkspaceId: workspaceId,
-      selectedSessionId: workspace.sessions[0]?.id,
+      selectedSessionId: firstSession?.id ?? "",
       clearLastError: true,
     });
   }
@@ -130,17 +133,9 @@ export class DesktopAppStore {
   async selectSession(target: WorkspaceSessionTarget): Promise<DesktopAppState> {
     await this.initialize();
     const sessionRef = toSessionRef(target);
-    const targetRecord = this.state.workspaces
-      .find((workspace) => workspace.id === target.workspaceId)
-      ?.sessions.find((session) => session.id === target.sessionId);
-
-    if (!targetRecord) {
-      return this.emit();
-    }
 
     try {
-      await this.driver.openSession(sessionRef);
-      await this.ensureSessionSubscribed(sessionRef);
+      await this.ensureSessionReady(sessionRef);
       return this.refreshState({
         selectedWorkspaceId: target.workspaceId,
         selectedSessionId: target.sessionId,
@@ -162,8 +157,8 @@ export class DesktopAppStore {
       const snapshot = await this.driver.createSession(workspace, {
         title: input.title?.trim() || "New thread",
       });
-      await this.ensureSessionSubscribed(snapshot.ref);
       this.transcriptCache.set(sessionKey(snapshot.ref), []);
+      await this.ensureSessionSubscribed(snapshot.ref);
       return this.refreshState({
         selectedWorkspaceId: snapshot.ref.workspaceId,
         selectedSessionId: snapshot.ref.sessionId,
@@ -196,7 +191,7 @@ export class DesktopAppStore {
 
     const sessionRef = this.selectedSessionRef();
     if (!sessionRef) {
-      return this.withError("Select a session before sending a message.");
+      return this.withError("Create or select a session before sending a message.");
     }
 
     const key = sessionKey(sessionRef);
@@ -206,8 +201,7 @@ export class DesktopAppStore {
     this.clearActiveAssistantMessage(sessionRef);
 
     try {
-      await this.driver.openSession(sessionRef);
-      await this.ensureSessionSubscribed(sessionRef);
+      await this.ensureSessionReady(sessionRef);
       await this.driver.sendUserMessage(sessionRef, { text });
       return this.refreshState({
         composerDraft: "",
@@ -223,8 +217,15 @@ export class DesktopAppStore {
     try {
       const persisted = await this.readUiState();
       this.transcriptCache.clear();
-      for (const [sessionKeyValue, transcript] of Object.entries(persisted.transcripts ?? {})) {
-        this.transcriptCache.set(sessionKeyValue, transcript.map(cloneTranscriptMessage));
+      for (const [key, transcript] of Object.entries(persisted.transcripts ?? {})) {
+        this.transcriptCache.set(key, transcript.map(cloneTranscriptMessage));
+      }
+
+      for (const workspacePath of this.initialWorkspacePaths) {
+        if (!workspacePath.trim()) {
+          continue;
+        }
+        await this.driver.syncWorkspace(workspacePath);
       }
 
       await this.refreshState({
@@ -250,7 +251,9 @@ export class DesktopAppStore {
       this.driver.listSessions(),
     ]);
 
-    const workspaces = buildWorkspaceRecords(workspacesSnapshot.workspaces, sessionsSnapshot.sessions, this.transcriptCache);
+    await this.pruneStaleSessionSubscriptions(sessionsSnapshot.sessions);
+
+    let workspaces = buildWorkspaceRecords(workspacesSnapshot.workspaces, sessionsSnapshot.sessions, this.transcriptCache);
     const selectedWorkspaceId = resolveSelectedWorkspaceId(
       options.selectedWorkspaceId ?? this.state.selectedWorkspaceId,
       workspaces,
@@ -260,6 +263,14 @@ export class DesktopAppStore {
       options.selectedSessionId ?? this.state.selectedSessionId,
       workspaces,
     );
+
+    if (selectedWorkspaceId && selectedSessionId) {
+      await this.ensureSessionReady({
+        workspaceId: selectedWorkspaceId,
+        sessionId: selectedSessionId,
+      });
+      workspaces = buildWorkspaceRecords(workspacesSnapshot.workspaces, sessionsSnapshot.sessions, this.transcriptCache);
+    }
 
     this.state = {
       ...this.state,
@@ -271,25 +282,42 @@ export class DesktopAppStore {
       revision: this.state.revision + 1,
     };
 
-    await this.reconcileSessionSubscriptions(sessionsSnapshot.sessions);
     await this.persistUiState();
     return this.emit();
   }
 
-  private async reconcileSessionSubscriptions(sessions: readonly SessionCatalogEntry[]): Promise<void> {
-    const activeKeys = new Set<string>();
-    for (const session of sessions) {
-      const key = sessionKey(session.sessionRef);
-      activeKeys.add(key);
-      await this.ensureSessionSubscribed(session.sessionRef);
-    }
-
+  private async pruneStaleSessionSubscriptions(sessions: readonly SessionCatalogEntry[]): Promise<void> {
+    const activeKeys = new Set(sessions.map((session) => sessionKey(session.sessionRef)));
     for (const [key, unsubscribe] of this.sessionSubscriptions) {
       if (!activeKeys.has(key)) {
         unsubscribe();
         this.sessionSubscriptions.delete(key);
+        this.activeAssistantMessageBySession.delete(key);
       }
     }
+  }
+
+  private async ensureSessionReady(sessionRef: SessionRef): Promise<void> {
+    await this.ensureTranscriptLoaded(sessionRef);
+    await this.ensureSessionSubscribed(sessionRef);
+  }
+
+  private async ensureTranscriptLoaded(sessionRef: SessionRef): Promise<void> {
+    const key = sessionKey(sessionRef);
+    if (this.transcriptCache.has(key)) {
+      return;
+    }
+
+    const transcript = await this.driver.getTranscript(sessionRef);
+    this.transcriptCache.set(
+      key,
+      transcript.map((message) => ({
+        id: message.id,
+        role: message.role,
+        text: message.text,
+        createdAt: message.createdAt,
+      })),
+    );
   }
 
   private async ensureSessionSubscribed(sessionRef: SessionRef): Promise<void> {
@@ -301,26 +329,26 @@ export class DesktopAppStore {
     const unsubscribe = this.driver.subscribe(sessionRef, (event) => {
       void this.handleSessionEvent(event);
     });
-
     this.sessionSubscriptions.set(key, unsubscribe);
   }
 
   private async handleSessionEvent(event: SessionDriverEvent): Promise<void> {
     const key = sessionKey(event.sessionRef);
+
     switch (event.type) {
       case "assistantDelta":
         this.appendAssistantDelta(event.sessionRef, event.text);
         break;
-      case "runCompleted":
       case "runFailed":
+        this.clearActiveAssistantMessage(event.sessionRef);
+        this.state = {
+          ...this.state,
+          lastError: event.error.message,
+        };
+        break;
+      case "runCompleted":
       case "sessionClosed":
         this.clearActiveAssistantMessage(event.sessionRef);
-        if (event.type === "runFailed") {
-          this.state = {
-            ...this.state,
-            lastError: event.error.message,
-          };
-        }
         break;
       case "sessionOpened":
       case "sessionUpdated":
@@ -334,8 +362,7 @@ export class DesktopAppStore {
     }
 
     if (event.type === "sessionClosed") {
-      const unsubscribe = this.sessionSubscriptions.get(key);
-      unsubscribe?.();
+      this.sessionSubscriptions.get(key)?.();
       this.sessionSubscriptions.delete(key);
     }
 
@@ -416,7 +443,7 @@ export class DesktopAppStore {
     const payload: PersistedUiState = {
       selectedWorkspaceId: this.state.selectedWorkspaceId || undefined,
       selectedSessionId: this.state.selectedSessionId || undefined,
-      composerDraft: this.state.composerDraft,
+      composerDraft: this.state.composerDraft || undefined,
       transcripts: Object.fromEntries(
         [...this.transcriptCache.entries()].map(([key, transcript]) => [key, transcript.slice(-120)]),
       ),
@@ -451,19 +478,15 @@ function buildWorkspaceRecords(
   sessions: readonly SessionCatalogEntry[],
   transcriptCache: Map<string, TranscriptMessage[]>,
 ): WorkspaceRecord[] {
-  return workspaces.map((workspace) => {
-    const workspaceSessions = sessions
+  return workspaces.map((workspace) => ({
+    id: workspace.workspaceId,
+    name: workspace.displayName,
+    path: workspace.path,
+    lastOpenedAt: workspace.lastOpenedAt,
+    sessions: sessions
       .filter((session) => session.workspaceId === workspace.workspaceId)
-      .map<SessionRecord>((session) => buildSessionRecord(session, transcriptCache));
-
-    return {
-      id: workspace.workspaceId,
-      name: workspace.displayName,
-      path: workspace.path,
-      lastOpenedAt: workspace.lastOpenedAt,
-      sessions: workspaceSessions,
-    };
-  });
+      .map((session) => buildSessionRecord(session, transcriptCache)),
+  }));
 }
 
 function buildSessionRecord(
@@ -498,22 +521,10 @@ function resolveSelectedSessionId(
   if (!workspace) {
     return "";
   }
-
   if (preferredSessionId && workspace.sessions.some((session) => session.id === preferredSessionId)) {
     return preferredSessionId;
   }
-
   return workspace.sessions[0]?.id ?? "";
-}
-
-function workspaceRefFromPath(path: string): WorkspaceRef {
-  const normalizedPath = path.trim();
-  const displayName = basename(normalizedPath) || normalizedPath;
-  return {
-    workspaceId: normalizedPath,
-    path: normalizedPath,
-    displayName,
-  };
 }
 
 function toSessionRef(target: WorkspaceSessionTarget): SessionRef {
@@ -537,7 +548,5 @@ function makeTranscriptMessage(role: SessionRole, text: string): TranscriptMessa
 }
 
 function cloneTranscriptMessage(message: TranscriptMessage): TranscriptMessage {
-  return {
-    ...message,
-  };
+  return { ...message };
 }
