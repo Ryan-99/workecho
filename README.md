@@ -6,8 +6,6 @@ This repo packages a desktop UI around `@mariozechner/pi-coding-agent`. It is no
 
 ![pi-app demo](./docs/readme/demo.gif)
 
-[Download the MP4 demo](./docs/readme/demo.mp4)
-
 ## Status
 
 - Experimental
