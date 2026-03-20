@@ -65,6 +65,11 @@ pnpm test
 - Live end-to-end validation may require model credentials not stored in this repo.
 - Package manifests remain `private: true`; this repo is intended for source collaboration first.
 
+## Acknowledgements
+
+- Built on top of [`@mariozechner/pi-coding-agent`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent)
+- Upstream runtime and ecosystem by [`badlogic/pi-mono`](https://github.com/badlogic/pi-mono)
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).
