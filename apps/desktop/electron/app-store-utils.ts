@@ -109,13 +109,17 @@ export function makeActivityItem(
   };
 }
 
-export function makeSummaryItem(label: string, metadata?: string): TranscriptMessage {
+export function makeSummaryItem(
+  label: string,
+  options: Partial<Pick<Extract<TranscriptMessage, { kind: "summary" }>, "metadata" | "presentation">> = {},
+): TranscriptMessage {
   return {
     kind: "summary",
     id: randomUUID(),
     createdAt: new Date().toISOString(),
     label,
-    ...(metadata ? { metadata } : {}),
+    presentation: options.presentation ?? "inline",
+    ...(options.metadata ? { metadata: options.metadata } : {}),
   };
 }
 

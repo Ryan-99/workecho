@@ -71,7 +71,7 @@ function updateSnapshot(
   });
 }
 
-function RunningStatus({ startedAt }: { readonly startedAt?: string }) {
+function useRunningLabel(startedAt: string | undefined) {
   const [label, setLabel] = useState(() => formatRunningLabel(startedAt));
 
   useEffect(() => {
@@ -89,7 +89,7 @@ function RunningStatus({ startedAt }: { readonly startedAt?: string }) {
     };
   }, [startedAt]);
 
-  return <>{label}</>;
+  return label;
 }
 
 function formatRunningLabel(startedAt: string | undefined): string {
@@ -116,6 +116,7 @@ export default function App() {
 
   const selectedWorkspace = snapshot ? (getSelectedWorkspace(snapshot) ?? snapshot.workspaces[0]) : undefined;
   const selectedSession = snapshot ? (getSelectedSession(snapshot) ?? selectedWorkspace?.sessions[0]) : undefined;
+  const runningLabel = useRunningLabel(selectedSession?.status === "running" ? selectedSession.runningSince : undefined);
   const selectedSessionKey = `${selectedWorkspace?.id ?? ""}:${selectedSession?.id ?? ""}`;
 
   useEffect(() => {
@@ -277,7 +278,9 @@ export default function App() {
                             <span className={`session-row__status session-row__status--${session.status}`} />
                             <span className="session-row__body">
                               <span className="session-row__title">{session.title}</span>
-                              <span className="session-row__preview">{session.preview}</span>
+                              {active && session.preview ? (
+                                <span className="session-row__preview">{session.preview}</span>
+                              ) : null}
                             </span>
                             <span className="session-row__time">{formatRelativeTime(session.updatedAt)}</span>
                           </button>
@@ -304,27 +307,27 @@ export default function App() {
       <main className="main">
         <header className="topbar">
           <div className="topbar__title">
+            <span className="topbar__workspace">
+              {selectedWorkspace ? selectedWorkspace.name : "Open a folder to begin"}
+            </span>
             {selectedWorkspace && selectedSession ? (
               <>
-                <span className="topbar__workspace">{selectedWorkspace.name}</span>
                 <span className="topbar__separator">/</span>
                 <span className="topbar__session">{selectedSession.title}</span>
               </>
-            ) : (
-              <span className="topbar__workspace">Open a folder to begin</span>
-            )}
+            ) : null}
           </div>
 
           <div className="topbar__actions">
             <button
-              className="button button--ghost"
+              aria-label="Add folder"
+              className="icon-button topbar__icon"
               type="button"
               onClick={() => {
                 void updateSnapshot(api, setSnapshot, () => api.pickWorkspace());
               }}
             >
               <FolderIcon />
-              <span>Add folder</span>
             </button>
           </div>
         </header>
@@ -332,57 +335,71 @@ export default function App() {
         {selectedWorkspace && selectedSession ? (
           <>
             <section className="canvas">
-              {snapshot.lastError ? <div className="error-banner">{snapshot.lastError}</div> : null}
+              <div className="conversation">
+                <div className="chat-header">
+                  <div className="chat-header__eyebrow">{selectedWorkspace.name}</div>
+                  <div className="chat-header__row">
+                    <h1 className="chat-header__title">{selectedSession.title}</h1>
+                    <div className="chat-header__status">
+                      {selectedSession.status === "running" ? runningLabel : formatRelativeTime(selectedSession.updatedAt)}
+                    </div>
+                  </div>
+                </div>
 
-              <div className="timeline-pane">
-                <div className="timeline" data-testid="transcript">
-                  {selectedSession.transcript.length === 0 ? (
-                    <div className="timeline-empty">Send a prompt to start the session.</div>
-                  ) : (
-                    selectedSession.transcript.map((item) => (
-                      <TimelineItem item={item} key={item.id} />
-                    ))
-                  )}
+                {snapshot.lastError ? <div className="error-banner">{snapshot.lastError}</div> : null}
+
+                <div className="timeline-pane">
+                  <div className="timeline" data-testid="transcript">
+                    {selectedSession.transcript.length === 0 ? (
+                      <div className="timeline-empty">Send a prompt to start the session.</div>
+                    ) : (
+                      selectedSession.transcript.map((item) => (
+                        <TimelineItem item={item} key={item.id} />
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
             </section>
 
             <footer className="composer">
-              <div className="composer__surface">
-                <textarea
-                  aria-label="Composer"
-                  data-testid="composer"
-                  ref={composerRef}
-                  value={composerDraft}
-                  onChange={(event) => {
-                    setComposerDraft(event.target.value);
-                  }}
-                  onKeyDown={handleComposerKeyDown}
-                  placeholder="Ask pi to inspect the repo, run a fix, or continue the current thread..."
-                />
-                <div className="composer__bar">
-                  <div className="composer__hint">
-                    {selectedSession.status === "running" ? (
-                      <RunningStatus startedAt={selectedSession.runningSince} />
-                    ) : (
-                      "Enter to send · Shift+Enter for newline"
-                    )}
-                  </div>
-                  <button
-                    className="button button--primary"
-                    data-testid="send"
-                    type="button"
-                    disabled={!composerDraft.trim() && selectedSession.status !== "running"}
-                    onClick={() => {
-                      if (selectedSession.status === "running") {
-                        void updateSnapshot(api, setSnapshot, () => api.cancelCurrentRun());
-                        return;
-                      }
-                      submitComposerDraft();
+              <div className="conversation conversation--composer">
+                <div className="composer__surface">
+                  <textarea
+                    aria-label="Composer"
+                    data-testid="composer"
+                    ref={composerRef}
+                    value={composerDraft}
+                    onChange={(event) => {
+                      setComposerDraft(event.target.value);
                     }}
-                  >
-                    {selectedSession.status === "running" ? "Stop" : "Send"}
-                  </button>
+                    onKeyDown={handleComposerKeyDown}
+                    placeholder="Ask pi to inspect the repo, run a fix, or continue the current thread..."
+                  />
+                  <div className="composer__bar">
+                    <div className="composer__hint">
+                      {selectedSession.status === "running" ? (
+                        runningLabel
+                      ) : (
+                        "Enter to send · Shift+Enter for newline"
+                      )}
+                    </div>
+                    <button
+                      className="button button--primary"
+                      data-testid="send"
+                      type="button"
+                      disabled={!composerDraft.trim() && selectedSession.status !== "running"}
+                      onClick={() => {
+                        if (selectedSession.status === "running") {
+                          void updateSnapshot(api, setSnapshot, () => api.cancelCurrentRun());
+                          return;
+                        }
+                        submitComposerDraft();
+                      }}
+                    >
+                      {selectedSession.status === "running" ? "Stop" : "Send"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </footer>

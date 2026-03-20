@@ -39,10 +39,15 @@ export function TimelineItem({
         </article>
       );
     case "summary":
-      return (
+      return item.presentation === "divider" ? (
         <div className="timeline-summary">
           <span>{item.label}</span>
           {item.metadata ? <span className="timeline-summary__meta">{item.metadata}</span> : null}
+        </div>
+      ) : (
+        <div className="timeline-activity timeline-activity--summary">
+          <span className="timeline-activity__label">{item.label}</span>
+          {item.metadata ? <span className="timeline-activity__meta">{item.metadata}</span> : null}
         </div>
       );
     default:

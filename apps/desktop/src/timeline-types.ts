@@ -3,6 +3,7 @@ import type { SessionTranscriptMessage, SessionTranscriptRole } from "@pi-app/pi
 export type SessionRole = SessionTranscriptRole;
 export type TimelineTone = "neutral" | "success" | "warning" | "error";
 export type TimelineToolStatus = "running" | "success" | "error";
+export type TimelineSummaryPresentation = "inline" | "divider";
 
 export interface TimelineActivity {
   readonly kind: "activity";
@@ -32,6 +33,7 @@ export interface TimelineSummary {
   readonly createdAt: string;
   readonly label: string;
   readonly metadata?: string;
+  readonly presentation: TimelineSummaryPresentation;
 }
 
 export type TranscriptMessage = SessionTranscriptMessage | TimelineActivity | TimelineToolCall | TimelineSummary;

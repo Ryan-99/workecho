@@ -144,11 +144,14 @@ export function applyTimelineEvent(
       if (metrics) {
         const label = summaryLabel(metrics);
         if (label) {
-          transcript.push(makeSummaryItem(label));
+          transcript.push(makeSummaryItem(label, { presentation: "inline" }));
         }
-        transcript.push(makeSummaryItem(workedForLabel(metrics.startedAt, event.timestamp)));
+        transcript.push(makeSummaryItem(workedForLabel(metrics.startedAt, event.timestamp), { presentation: "divider" }));
       } else {
-        transcript.push(makeSummaryItem("Completed", relativeDetail(event.timestamp)));
+        transcript.push(makeSummaryItem("Completed", {
+          presentation: "divider",
+          metadata: relativeDetail(event.timestamp),
+        }));
       }
       break;
     }
