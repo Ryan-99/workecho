@@ -1,20 +1,25 @@
-import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
-import { PiSdkDriver, type PiSdkDriverConfig, type SessionTranscriptMessage } from "@pi-app/pi-sdk-driver";
-import type { SessionCatalogEntry, WorkspaceCatalogEntry } from "@pi-app/catalogs";
+import { dirname, join } from "node:path";
+import { PiSdkDriver, type PiSdkDriverConfig } from "@pi-app/pi-sdk-driver";
+import type { SessionCatalogEntry } from "@pi-app/catalogs";
 import type { SessionDriverEvent, SessionRef, WorkspaceRef } from "@pi-app/session-driver";
 import {
   cloneDesktopAppState,
   createEmptyDesktopAppState,
   type CreateSessionInput,
   type DesktopAppState,
-  type SessionRecord,
-  type SessionRole,
   type TranscriptMessage,
-  type WorkspaceRecord,
   type WorkspaceSessionTarget,
 } from "../src/desktop-state";
+import {
+  buildWorkspaceRecords,
+  cloneTranscriptMessage,
+  makeTranscriptMessage,
+  resolveSelectedSessionId,
+  resolveSelectedWorkspaceId,
+  sessionKey,
+  toSessionRef,
+} from "./app-store-utils";
 
 type StateListener = (state: DesktopAppState) => void;
 
@@ -471,82 +476,4 @@ export class DesktopAppStore {
     await this.persistUiState();
     return this.emit();
   }
-}
-
-function buildWorkspaceRecords(
-  workspaces: readonly WorkspaceCatalogEntry[],
-  sessions: readonly SessionCatalogEntry[],
-  transcriptCache: Map<string, TranscriptMessage[]>,
-): WorkspaceRecord[] {
-  return workspaces.map((workspace) => ({
-    id: workspace.workspaceId,
-    name: workspace.displayName,
-    path: workspace.path,
-    lastOpenedAt: workspace.lastOpenedAt,
-    sessions: sessions
-      .filter((session) => session.workspaceId === workspace.workspaceId)
-      .map((session) => buildSessionRecord(session, transcriptCache)),
-  }));
-}
-
-function buildSessionRecord(
-  session: SessionCatalogEntry,
-  transcriptCache: Map<string, TranscriptMessage[]>,
-): SessionRecord {
-  const transcript = transcriptCache.get(sessionKey(session.sessionRef)) ?? [];
-  const preview = transcript.at(-1)?.text ?? session.previewSnippet ?? session.title;
-  return {
-    id: session.sessionRef.sessionId,
-    title: session.title,
-    updatedAt: session.updatedAt,
-    preview,
-    status: session.status,
-    transcript: transcript.map(cloneTranscriptMessage),
-  };
-}
-
-function resolveSelectedWorkspaceId(preferredWorkspaceId: string, workspaces: readonly WorkspaceRecord[]): string {
-  if (preferredWorkspaceId && workspaces.some((workspace) => workspace.id === preferredWorkspaceId)) {
-    return preferredWorkspaceId;
-  }
-  return workspaces[0]?.id ?? "";
-}
-
-function resolveSelectedSessionId(
-  workspaceId: string,
-  preferredSessionId: string,
-  workspaces: readonly WorkspaceRecord[],
-): string {
-  const workspace = workspaces.find((entry) => entry.id === workspaceId);
-  if (!workspace) {
-    return "";
-  }
-  if (preferredSessionId && workspace.sessions.some((session) => session.id === preferredSessionId)) {
-    return preferredSessionId;
-  }
-  return workspace.sessions[0]?.id ?? "";
-}
-
-function toSessionRef(target: WorkspaceSessionTarget): SessionRef {
-  return {
-    workspaceId: target.workspaceId,
-    sessionId: target.sessionId,
-  };
-}
-
-function sessionKey(sessionRef: SessionRef): string {
-  return `${sessionRef.workspaceId}:${sessionRef.sessionId}`;
-}
-
-function makeTranscriptMessage(role: SessionRole, text: string): TranscriptMessage {
-  return {
-    id: randomUUID(),
-    role,
-    text,
-    createdAt: new Date().toISOString(),
-  };
-}
-
-function cloneTranscriptMessage(message: TranscriptMessage): TranscriptMessage {
-  return { ...message };
 }

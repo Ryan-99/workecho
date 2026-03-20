@@ -42,6 +42,11 @@ export interface PiSdkDriverOptions {
   readonly createAgentSessionImpl?: (options?: CreateAgentSessionOptions) => Promise<{ session: AgentSession }>;
 }
 
+export interface SyncWorkspaceResult {
+  readonly workspace: WorkspaceRef;
+  readonly sessions: SessionCatalogSnapshot["sessions"];
+}
+
 interface ManagedSessionRecord {
   readonly ref: SessionRef;
   readonly workspace: WorkspaceRef;
@@ -84,10 +89,7 @@ export class SessionSupervisor {
     return workspace;
   }
 
-  async syncWorkspace(path: string, displayName?: string): Promise<{
-    workspace: WorkspaceRef;
-    sessions: SessionCatalogSnapshot["sessions"];
-  }> {
+  async syncWorkspace(path: string, displayName?: string): Promise<SyncWorkspaceResult> {
     const workspace = await this.registerWorkspace(path, displayName);
     const infos = await SessionManager.list(path);
 
@@ -211,16 +213,23 @@ export class SessionSupervisor {
   }
 
   subscribe(sessionRef: SessionRef, listener: SessionEventListener): Unsubscribe {
-    const record = this.records.get(sessionKey(sessionRef));
-    if (!record) {
-      throw new Error(`Unknown session ${sessionKey(sessionRef)}.`);
-    }
+    const key = sessionKey(sessionRef);
+    let active = true;
 
-    record.listeners.add(listener);
-    void Promise.resolve(listener(sessionUpdatedEvent(record))).catch(() => {});
+    void this.ensureRecord(sessionRef)
+      .then((record) => {
+        if (!active) {
+          return;
+        }
+
+        record.listeners.add(listener);
+        void Promise.resolve(listener(sessionUpdatedEvent(record))).catch(() => {});
+      })
+      .catch(() => {});
 
     return () => {
-      record.listeners.delete(listener);
+      active = false;
+      this.records.get(key)?.listeners.delete(listener);
     };
   }
 

@@ -9,7 +9,11 @@ import type {
   Unsubscribe,
   WorkspaceRef,
 } from "@pi-app/session-driver";
-import { SessionSupervisor, type PiSdkDriverOptions } from "./session-supervisor.js";
+import {
+  SessionSupervisor,
+  type PiSdkDriverOptions,
+  type SyncWorkspaceResult,
+} from "./session-supervisor.js";
 
 export interface PiSdkDriverConfig extends PiSdkDriverOptions {}
 
@@ -50,6 +54,14 @@ export class PiSdkDriver implements SessionDriver {
 
   listSessions(workspaceId?: WorkspaceId): Promise<SessionCatalogSnapshot> {
     return this.supervisor.listSessions(workspaceId);
+  }
+
+  syncWorkspace(path: string, displayName?: string): Promise<SyncWorkspaceResult> {
+    return this.supervisor.syncWorkspace(path, displayName);
+  }
+
+  getTranscript(sessionRef: SessionRef) {
+    return this.supervisor.getTranscript(sessionRef);
   }
 }
 

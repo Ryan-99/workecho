@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import net from "node:net";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,8 +7,6 @@ import { chromium, expect, test, type Browser, type Page } from "@playwright/tes
 import type { PiDesktopApi } from "../src/ipc";
 
 const desktopDir = process.cwd();
-const require = createRequire(import.meta.url);
-const electronBinary = require("electron") as string;
 type PiAppWindow = Window & { piApp?: PiDesktopApi };
 
 interface DesktopHarness {
@@ -113,6 +110,7 @@ test("navigates across folders and sessions through the sidebar", async () => {
 
 async function launchDesktop(userDataDir: string, initialWorkspaces: readonly string[] = []): Promise<DesktopHarness> {
   const port = await reservePort();
+  const electronBinary = await resolveElectronBinary();
   const processHandle = spawn(electronBinary, [`--remote-debugging-port=${port}`, desktopDir], {
     cwd: desktopDir,
     env: {
@@ -149,6 +147,24 @@ async function launchDesktop(userDataDir: string, initialWorkspaces: readonly st
     processHandle.kill("SIGKILL");
     throw error;
   }
+}
+
+async function resolveElectronBinary(): Promise<string> {
+  const electronModule = (await import("electron")) as unknown;
+  if (typeof electronModule === "string") {
+    return electronModule;
+  }
+
+  if (
+    typeof electronModule === "object" &&
+    electronModule !== null &&
+    "default" in electronModule &&
+    typeof (electronModule as { default: unknown }).default === "string"
+  ) {
+    return (electronModule as { default: string }).default;
+  }
+
+  throw new Error("Unable to resolve the Electron executable path");
 }
 
 async function reservePort(): Promise<number> {
