@@ -1,0 +1,36 @@
+{
+  "name": "@pi-app/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Codex-style desktop shell for pi",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -r \"pnpm:dev:renderer\" \"pnpm:dev:electron:watch\" \"pnpm:dev:electron:start\"",
+    "dev:renderer": "vite",
+    "dev:electron:watch": "tsup electron/main.ts electron/preload.ts --format cjs --platform node --target node22 --out-dir dist-electron --watch",
+    "dev:electron:start": "wait-on dist-electron/main.js dist-electron/preload.js tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "build": "pnpm run build:renderer && pnpm run build:electron",
+    "build:renderer": "vite build",
+    "build:electron": "tsup electron/main.ts electron/preload.ts --format cjs --platform node --target node22 --out-dir dist-electron",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test": "playwright test",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^34.3.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0",
+    "wait-on": "^8.0.2"
+  }
+}

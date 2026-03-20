@@ -1,5 +1,6 @@
-export type WorkspaceId = string;
-export type SessionRef = string;
+import type { SessionRef, WorkspaceId } from "@pi-app/session-driver";
+
+export type { SessionRef, WorkspaceId };
 
 export interface WorkspaceCatalogEntry {
   workspaceId: WorkspaceId;

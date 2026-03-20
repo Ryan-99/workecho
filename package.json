@@ -1,0 +1,19 @@
+{
+  "name": "pi-app",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.25.0",
+  "scripts": {
+    "dev": "pnpm --filter @pi-app/desktop dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present test",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  }
+}

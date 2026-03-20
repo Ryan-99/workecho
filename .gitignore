@@ -1,0 +1,9 @@
+node_modules/
+.turbo/
+dist/
+build/
+out/
+playwright-report/
+test-results/
+.DS_Store
+
