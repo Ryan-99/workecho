@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "pnpm --filter @pi-app/desktop dev",
     "build": "pnpm -r --if-present build",
-    "typecheck": "pnpm -r --if-present typecheck",
+    "typecheck": "pnpm --filter @pi-app/session-driver build && pnpm --filter @pi-app/catalogs build && pnpm --filter @pi-app/pi-sdk-driver build && pnpm -r --if-present typecheck",
     "lint": "pnpm -r --if-present lint",
     "test": "pnpm -r --if-present test",
     "e2e": "playwright test"
