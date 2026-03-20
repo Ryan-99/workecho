@@ -28,16 +28,34 @@ test("supports slash commands plus image draft preview and removal", async () =>
     await expect(window.locator(".topbar__session")).toHaveText("Controls session");
 
     const composer = window.getByTestId("composer");
-    await composer.fill("/");
-    await expect(window.locator(".slash-menu")).toBeVisible();
-    await expect(window.locator(".slash-menu")).toContainText("Model");
-    await expect(window.locator(".slash-menu")).toContainText("Reasoning");
+    await composer.fill("/st");
+    const slashMenu = window.getByTestId("slash-menu");
+    await expect(slashMenu).toBeVisible();
+    await expect(slashMenu).toContainText("Status");
+    const slashMenuBox = await slashMenu.boundingBox();
+    const composerBox = await composer.boundingBox();
+    expect(slashMenuBox).not.toBeNull();
+    expect(composerBox).not.toBeNull();
+    expect((slashMenuBox?.y ?? 0) + (slashMenuBox?.height ?? 0)).toBeLessThanOrEqual((composerBox?.y ?? 0) + 2);
 
-    await window.evaluate(async () => {
-      const app = (window as PiAppWindow).piApp;
-      if (!app) throw new Error("piApp unavailable");
-      await app.submitComposer("/thinking high");
-    });
+    await composer.press("Tab");
+    await expect(window.getByTestId("slash-menu")).toHaveCount(0);
+    await expect(composer).toHaveValue("/status");
+    await composer.press("Enter");
+    await expect(window.locator(".timeline")).toContainText("Model");
+    await expect(composer).toHaveValue("");
+
+    await composer.fill("/thinking");
+    const optionsMenu = window.getByTestId("slash-options-menu");
+    await expect(optionsMenu).toBeVisible();
+    await expect(optionsMenu).toContainText("Low");
+    await expect(optionsMenu).toContainText("Extra High");
+    await composer.press("ArrowDown");
+    await composer.press("ArrowDown");
+    await composer.press("Enter");
+    await expect(optionsMenu).toHaveCount(0);
+    await expect(composer).toHaveValue("/thinking high");
+    await composer.press("Enter");
     await expect(window.locator(".timeline")).toContainText("Thinking set to high");
     await expect(window.locator(".composer__hint")).toContainText("high");
 
@@ -84,6 +102,21 @@ test("supports slash commands plus image draft preview and removal", async () =>
     expect(state.composerAttachments).toHaveLength(1);
     expect(state.composerAttachments[0]?.name).toBe("image.png");
     expect(state.workspaces.find((workspace) => workspace.id === workspaceId)?.sessions).toHaveLength(1);
+
+    const appRegions = await window.evaluate(() => {
+      const topbar = document.querySelector<HTMLElement>("[data-testid='topbar']");
+      const addFolder = document.querySelector<HTMLElement>(".topbar__actions button");
+      return {
+        topbar: topbar ? getComputedStyle(topbar).getPropertyValue("-webkit-app-region") : "",
+        addFolder: addFolder ? getComputedStyle(addFolder).getPropertyValue("-webkit-app-region") : "",
+      };
+    });
+    expect(appRegions.topbar).toBe("drag");
+    expect(appRegions.addFolder).toBe("no-drag");
+
+    const sizeBefore = await window.evaluate(() => `${window.outerWidth}x${window.outerHeight}`);
+    await window.getByTestId("topbar").dblclick({ position: { x: 140, y: 12 } });
+    await expect.poll(() => window.evaluate(() => `${window.outerWidth}x${window.outerHeight}`)).not.toBe(sizeBefore);
   } finally {
     await harness.close();
   }

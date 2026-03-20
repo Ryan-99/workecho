@@ -18,6 +18,7 @@ export const desktopIpc = {
   removeComposerImage: "pi-app:remove-composer-image",
   updateComposerDraft: "pi-app:update-composer-draft",
   submitComposer: "pi-app:submit-composer",
+  toggleWindowMaximize: "pi-app:toggle-window-maximize",
   ping: "app:ping",
   openExternal: "app:open-external",
 } as const;
@@ -45,5 +46,6 @@ export interface PiDesktopApi {
   removeComposerImage(attachmentId: string): Promise<DesktopAppState>;
   updateComposerDraft(composerDraft: string): Promise<DesktopAppState>;
   submitComposer(text: string): Promise<DesktopAppState>;
+  toggleWindowMaximize(): Promise<void>;
   openExternal(url: string): Promise<void>;
 }

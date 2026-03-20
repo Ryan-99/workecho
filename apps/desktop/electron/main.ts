@@ -149,6 +149,19 @@ app.whenReady().then(async () => {
     store.updateComposerDraft(composerDraft),
   );
   ipcMain.handle(desktopIpc.submitComposer, (_event, text: string) => store.submitComposer(text));
+  ipcMain.handle(desktopIpc.toggleWindowMaximize, (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) {
+      return;
+    }
+
+    if (window.isMaximized()) {
+      window.unmaximize();
+      return;
+    }
+
+    window.maximize();
+  });
 
   mainWindow = createWindow();
   attachStatePublisher(mainWindow);

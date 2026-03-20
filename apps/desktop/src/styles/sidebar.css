@@ -32,10 +32,11 @@
 }
 
 .sidebar__top {
-  padding-top: 12px;
+  padding-top: 54px;
 }
 
 .sidebar__new {
+  -webkit-app-region: no-drag;
   width: 100%;
   min-height: 36px;
   padding: 8px 12px;

@@ -14,6 +14,10 @@ test("boots the Codex-style shell with an empty workspace catalog", async () => 
     await expect(window.getByRole("button", { name: "Open first folder" })).toBeVisible();
     await expect(window.getByTestId("empty-state")).toBeVisible();
 
+    const newThreadBox = await window.getByRole("button", { name: "New thread" }).boundingBox();
+    expect(newThreadBox).not.toBeNull();
+    expect(newThreadBox?.y ?? 0).toBeGreaterThan(40);
+
     const state = await getDesktopState(window);
     expect(state.workspaces).toEqual([]);
     expect(state.selectedWorkspaceId).toBe("");

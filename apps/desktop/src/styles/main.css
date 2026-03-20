@@ -7,6 +7,7 @@
 }
 
 .topbar {
+  -webkit-app-region: drag;
   padding: 12px 18px 10px;
   display: flex;
   align-items: center;
@@ -52,6 +53,11 @@
   gap: 8px;
 }
 
+.topbar__actions,
+.topbar__actions * {
+  -webkit-app-region: no-drag;
+}
+
 .topbar__icon {
   width: 30px;
   height: 30px;
@@ -71,6 +77,8 @@
 
 .conversation--composer {
   position: relative;
+  display: grid;
+  gap: 12px;
 }
 
 .chat-header {
@@ -464,11 +472,13 @@
 .slash-menu {
   display: grid;
   gap: 4px;
-  margin-top: 10px;
   padding: 6px;
   border-radius: 14px;
   border: 1px solid #dfe4ee;
-  background: #fcfcfe;
+  background: rgba(252, 252, 254, 0.98);
+  box-shadow: 0 20px 48px rgba(20, 27, 45, 0.14);
+  position: relative;
+  z-index: 2;
 }
 
 .slash-menu__item {
@@ -496,6 +506,55 @@
 .slash-menu__description {
   color: var(--muted-soft);
   font-size: 12px;
+}
+
+.slash-menu--options {
+  gap: 2px;
+}
+
+.slash-menu__search {
+  padding: 10px 12px;
+  color: var(--muted-soft);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.slash-menu__option {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-align: left;
+}
+
+.slash-menu__option::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.slash-menu__option--active,
+.slash-menu__option:hover {
+  background: #f2f4f9;
+}
+
+.slash-menu__option--active::after {
+  background: #4d5dd8;
+}
+
+.slash-menu__option-title {
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.slash-menu__option-description {
+  color: var(--muted-soft);
+  font-size: 13px;
 }
 
 .canvas--empty {

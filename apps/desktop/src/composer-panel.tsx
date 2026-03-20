@@ -1,7 +1,7 @@
 import { type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from "react";
 import type { ComposerImageAttachment, SessionRecord } from "./desktop-state";
 import { PlusIcon } from "./icons";
-import type { ComposerSlashCommand } from "./composer-commands";
+import type { ComposerSlashCommand, ComposerSlashOption } from "./composer-commands";
 
 interface ComposerPanelProps {
   readonly selectedSession: SessionRecord;
@@ -11,11 +11,16 @@ interface ComposerPanelProps {
   readonly runningLabel: string;
   readonly attachments: readonly ComposerImageAttachment[];
   readonly slashSuggestions: readonly ComposerSlashCommand[];
+  readonly slashOptions: readonly ComposerSlashOption[];
   readonly selectedSlashCommand?: ComposerSlashCommand;
+  readonly selectedSlashOption?: ComposerSlashOption;
   readonly showSlashMenu: boolean;
+  readonly showSlashOptionMenu: boolean;
   readonly onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   readonly onPickImages: () => void;
   readonly onRemoveImage: (attachmentId: string) => void;
+  readonly onSelectSlashCommand: (command: ComposerSlashCommand) => void;
+  readonly onSelectSlashOption: (option: ComposerSlashOption) => void;
   readonly onSubmit: () => void;
 }
 
@@ -27,16 +32,53 @@ export function ComposerPanel({
   runningLabel,
   attachments,
   slashSuggestions,
+  slashOptions,
   selectedSlashCommand,
+  selectedSlashOption,
   showSlashMenu,
+  showSlashOptionMenu,
   onComposerKeyDown,
   onPickImages,
   onRemoveImage,
+  onSelectSlashCommand,
+  onSelectSlashOption,
   onSubmit,
 }: ComposerPanelProps) {
   return (
     <footer className="composer">
       <div className="conversation conversation--composer">
+        {showSlashMenu ? (
+          <div className="slash-menu" data-testid="slash-menu">
+            {slashSuggestions.map((command) => (
+              <button
+                className={`slash-menu__item ${selectedSlashCommand?.command === command.command ? "slash-menu__item--active" : ""}`}
+                key={command.command}
+                type="button"
+                onClick={() => onSelectSlashCommand(command)}
+              >
+                <span className="slash-menu__title">{command.title}</span>
+                <span className="slash-menu__command">{command.command}</span>
+                <span className="slash-menu__description">{command.description}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {showSlashOptionMenu && selectedSlashCommand ? (
+          <div className="slash-menu slash-menu--options" data-testid="slash-options-menu">
+            <div className="slash-menu__search">{selectedSlashCommand.title}</div>
+            {slashOptions.map((option) => (
+              <button
+                className={`slash-menu__option ${selectedSlashOption?.value === option.value ? "slash-menu__option--active" : ""}`}
+                key={option.value}
+                type="button"
+                onClick={() => onSelectSlashOption(option)}
+              >
+                <span className="slash-menu__option-title">{option.label}</span>
+                <span className="slash-menu__option-description">{option.description}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="composer__surface">
           {attachments.length > 0 ? (
             <div className="composer__attachments">
@@ -71,25 +113,6 @@ export function ComposerPanel({
             onKeyDown={onComposerKeyDown}
             placeholder="Ask pi to inspect the repo, run a fix, or continue the current thread..."
           />
-          {showSlashMenu ? (
-            <div className="slash-menu">
-              {slashSuggestions.map((command) => (
-                <button
-                  className={`slash-menu__item ${selectedSlashCommand?.command === command.command ? "slash-menu__item--active" : ""}`}
-                  key={command.command}
-                  type="button"
-                  onClick={() => {
-                    setComposerDraft(command.template);
-                    composerRef.current?.focus();
-                  }}
-                >
-                  <span className="slash-menu__title">{command.title}</span>
-                  <span className="slash-menu__command">{command.command}</span>
-                  <span className="slash-menu__description">{command.description}</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
           <div className="composer__bar">
             <div className="composer__hint">
               {selectedSession.status === "running" ? runningLabel : "Enter to send · Shift+Enter for newline"}
