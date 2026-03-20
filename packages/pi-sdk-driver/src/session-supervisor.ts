@@ -4,6 +4,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   type CreateAgentSessionOptions,
+  type SessionInfo,
 } from "@mariozechner/pi-coding-agent";
 import type { SessionCatalogSnapshot, WorkspaceCatalogSnapshot } from "@pi-app/catalogs";
 import type {
@@ -18,18 +19,23 @@ import type {
   WorkspaceId,
   WorkspaceRef,
 } from "@pi-app/session-driver";
-import { JsonCatalogStore } from "./json-catalog-store.js";
+import { JsonCatalogStore, type SessionFileCatalogStorage } from "./json-catalog-store.js";
 import {
   buildSnapshot,
+  createWorkspaceRef,
   deriveWorkspaceTitle,
   determineRunOutcome,
   extractPreview,
   nowIso,
+  previewFromSessionInfo,
   sessionKey,
+  titleFromSessionInfo,
   toSessionErrorInfo,
+  transcriptFromMessages,
   truncate,
   workspaceToRef,
 } from "./session-supervisor-utils.js";
+import type { SessionTranscriptMessage } from "./transcript.js";
 
 export interface PiSdkDriverOptions {
   readonly catalogFilePath?: string;
@@ -53,7 +59,7 @@ interface ManagedSessionRecord {
 }
 
 export class SessionSupervisor {
-  private readonly catalogs: JsonCatalogStore;
+  private readonly catalogs: SessionFileCatalogStorage;
   private readonly createAgentSessionImpl: (options?: CreateAgentSessionOptions) => Promise<{ session: AgentSession }>;
   private readonly records = new Map<string, ManagedSessionRecord>();
 
@@ -72,6 +78,36 @@ export class SessionSupervisor {
     return this.catalogs.sessions.listSessions(workspaceId);
   }
 
+  async registerWorkspace(path: string, displayName?: string): Promise<WorkspaceRef> {
+    const workspace = createWorkspaceRef(path, displayName);
+    await this.touchWorkspace(workspace);
+    return workspace;
+  }
+
+  async syncWorkspace(path: string, displayName?: string): Promise<{
+    workspace: WorkspaceRef;
+    sessions: SessionCatalogSnapshot["sessions"];
+  }> {
+    const workspace = await this.registerWorkspace(path, displayName);
+    const infos = await SessionManager.list(path);
+
+    for (const info of infos) {
+      const entry = this.sessionEntryFromInfo(workspace, info);
+      await this.catalogs.sessions.upsertSession(entry);
+      await this.catalogs.setSessionFile(entry.sessionRef, info.path);
+    }
+
+    return {
+      workspace,
+      sessions: (await this.catalogs.sessions.listSessions(workspace.workspaceId)).sessions,
+    };
+  }
+
+  async getTranscript(sessionRef: SessionRef): Promise<SessionTranscriptMessage[]> {
+    const record = await this.ensureRecord(sessionRef);
+    return transcriptFromMessages(record.session?.messages ?? [], record.updatedAt);
+  }
+
   async createSession(workspace: WorkspaceRef, options?: CreateSessionOptions): Promise<SessionSnapshot> {
     await this.touchWorkspace(workspace);
 
@@ -79,6 +115,7 @@ export class SessionSupervisor {
       cwd: workspace.path,
       sessionManager: SessionManager.create(workspace.path),
     });
+
     const record = this.createRecord(workspace, session, options?.title ?? deriveWorkspaceTitle(workspace));
     const sessionFile = record.sessionFile ?? session.sessionManager.getSessionFile();
     if (sessionFile) {
@@ -147,16 +184,13 @@ export class SessionSupervisor {
       record.updatedAt = nowIso();
       record.preview = error instanceof Error ? error.message : String(error);
       await this.persistSnapshot(record);
-      await this.emit(
-        record,
-        {
-          type: "runFailed",
-          sessionRef: record.ref,
-          timestamp: nowIso(),
-          error: toSessionErrorInfo(error, "SEND_FAILED"),
-          runId,
-        },
-      );
+      await this.emit(record, {
+        type: "runFailed",
+        sessionRef: record.ref,
+        timestamp: nowIso(),
+        error: toSessionErrorInfo(error, "SEND_FAILED"),
+        runId,
+      });
       await this.emit(record, sessionUpdatedEvent(record));
       throw error;
     }
@@ -205,7 +239,7 @@ export class SessionSupervisor {
       try {
         await record.session.abort();
       } catch {
-        // Best effort for the spike.
+        // Best effort.
       }
       record.unsubscribeAgent?.();
       record.unsubscribeAgent = undefined;
@@ -240,11 +274,9 @@ export class SessionSupervisor {
     }
     await this.touchWorkspace(workspaceToRef(workspace));
 
-    const sessionFile = existing?.sessionFile ?? (await this.catalogs.getSessionFile(sessionRef));
+    const sessionFile = existing?.sessionFile ?? sessionEntry.sessionFilePath ?? (await this.catalogs.getSessionFile(sessionRef));
     if (!sessionFile) {
-      throw new Error(
-        `Session ${key} cannot be reopened yet because no session file is tracked. This spike keeps the persistence layer minimal.`,
-      );
+      throw new Error(`Session ${key} cannot be reopened because no session file is tracked.`);
     }
 
     const { session } = await this.createAgentSessionImpl({
@@ -318,14 +350,12 @@ export class SessionSupervisor {
 
     switch (event.type) {
       case "agent_start":
-        record.status = "running";
-        record.updatedAt = timestamp;
-        return [sessionUpdatedEvent(record)];
       case "turn_start":
         record.status = "running";
         record.updatedAt = timestamp;
         return [sessionUpdatedEvent(record)];
       case "message_start":
+      case "message_end":
         this.updatePreviewFromMessage(record, event.message);
         record.updatedAt = timestamp;
         return [sessionUpdatedEvent(record)];
@@ -344,50 +374,43 @@ export class SessionSupervisor {
             : [base, sessionUpdatedEvent(record)];
         }
         return [sessionUpdatedEvent(record)];
-      case "message_end":
-        this.updatePreviewFromMessage(record, event.message);
-        record.updatedAt = timestamp;
-        return [sessionUpdatedEvent(record)];
-      case "tool_execution_start":
+      case "tool_execution_start": {
         record.status = "running";
         record.updatedAt = timestamp;
-        {
-          const base = {
-            type: "toolStarted" as const,
-            sessionRef: record.ref,
-            timestamp,
-            toolName: event.toolName,
-            callId: event.toolCallId,
-            input: event.args,
-          };
-          return record.runningRunId ? [{ ...base, runId: record.runningRunId }, sessionUpdatedEvent(record)] : [base, sessionUpdatedEvent(record)];
-        }
-      case "tool_execution_update":
+        const base = {
+          type: "toolStarted" as const,
+          sessionRef: record.ref,
+          timestamp,
+          toolName: event.toolName,
+          callId: event.toolCallId,
+          input: event.args,
+        };
+        return record.runningRunId ? [{ ...base, runId: record.runningRunId }, sessionUpdatedEvent(record)] : [base, sessionUpdatedEvent(record)];
+      }
+      case "tool_execution_update": {
         record.updatedAt = timestamp;
-        {
-          const base = {
-            type: "toolUpdated" as const,
-            sessionRef: record.ref,
-            timestamp,
-            callId: event.toolCallId,
-            ...(typeof event.partialResult === "string" ? { text: event.partialResult } : {}),
-            ...(typeof event.partialResult === "number" ? { progress: event.partialResult } : {}),
-          };
-          return record.runningRunId ? [{ ...base, runId: record.runningRunId }, sessionUpdatedEvent(record)] : [base, sessionUpdatedEvent(record)];
-        }
-      case "tool_execution_end":
+        const base = {
+          type: "toolUpdated" as const,
+          sessionRef: record.ref,
+          timestamp,
+          callId: event.toolCallId,
+          ...(typeof event.partialResult === "string" ? { text: event.partialResult } : {}),
+          ...(typeof event.partialResult === "number" ? { progress: event.partialResult } : {}),
+        };
+        return record.runningRunId ? [{ ...base, runId: record.runningRunId }, sessionUpdatedEvent(record)] : [base, sessionUpdatedEvent(record)];
+      }
+      case "tool_execution_end": {
         record.updatedAt = timestamp;
-        {
-          const base = {
-            type: "toolFinished" as const,
-            sessionRef: record.ref,
-            timestamp,
-            callId: event.toolCallId,
-            success: !event.isError,
-            output: event.result,
-          };
-          return record.runningRunId ? [{ ...base, runId: record.runningRunId }, sessionUpdatedEvent(record)] : [base, sessionUpdatedEvent(record)];
-        }
+        const base = {
+          type: "toolFinished" as const,
+          sessionRef: record.ref,
+          timestamp,
+          callId: event.toolCallId,
+          success: !event.isError,
+          output: event.result,
+        };
+        return record.runningRunId ? [{ ...base, runId: record.runningRunId }, sessionUpdatedEvent(record)] : [base, sessionUpdatedEvent(record)];
+      }
       case "turn_end":
         record.updatedAt = timestamp;
         return [sessionUpdatedEvent(record)];
@@ -443,6 +466,7 @@ export class SessionSupervisor {
       updatedAt: snapshot.updatedAt,
       status: snapshot.status,
       ...(snapshot.preview !== undefined ? { previewSnippet: snapshot.preview } : {}),
+      ...(record.sessionFile ? { sessionFilePath: record.sessionFile } : {}),
     });
     if (record.sessionFile) {
       await this.catalogs.setSessionFile(record.ref, record.sessionFile);
@@ -467,6 +491,22 @@ export class SessionSupervisor {
       sortOrder: await this.deriveWorkspaceSortOrder(workspace.workspaceId),
       pinned: false,
     });
+  }
+
+  private sessionEntryFromInfo(workspace: WorkspaceRef, info: SessionInfo) {
+    const preview = previewFromSessionInfo(info);
+    return {
+      sessionRef: {
+        workspaceId: workspace.workspaceId,
+        sessionId: info.id,
+      },
+      workspaceId: workspace.workspaceId,
+      title: titleFromSessionInfo(info),
+      updatedAt: info.modified.toISOString(),
+      status: "idle" as const,
+      ...(preview ? { previewSnippet: preview } : {}),
+      sessionFilePath: info.path,
+    };
   }
 }
 

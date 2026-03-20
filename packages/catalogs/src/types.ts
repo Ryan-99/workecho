@@ -19,6 +19,7 @@ export interface SessionCatalogEntry {
   title: string;
   updatedAt: string;
   previewSnippet?: string;
+  sessionFilePath?: string;
   status: SessionStatus;
 }
 

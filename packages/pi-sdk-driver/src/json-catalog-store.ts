@@ -22,7 +22,13 @@ export interface JsonCatalogStoreOptions {
   readonly catalogFilePath?: string;
 }
 
-export class JsonCatalogStore implements CatalogStorage {
+export interface SessionFileCatalogStorage extends CatalogStorage {
+  getSessionFile(sessionRef: SessionRef): Promise<string | undefined>;
+  setSessionFile(sessionRef: SessionRef, sessionFile: string): Promise<void>;
+  deleteSessionFile(sessionRef: SessionRef): Promise<void>;
+}
+
+export class JsonCatalogStore implements SessionFileCatalogStorage {
   private readonly filePath: string;
   private state: CatalogFileState | undefined;
   private loadPromise: Promise<void> | undefined;

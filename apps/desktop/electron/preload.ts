@@ -1,8 +1,32 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { desktopIpc } from "../src/ipc";
+import type { DesktopAppState } from "../src/desktop-state";
 
 contextBridge.exposeInMainWorld("piApp", {
   platform: process.platform,
   versions: process.versions,
-  ping: () => ipcRenderer.invoke("app:ping") as Promise<string>,
-  openExternal: (url: string) => ipcRenderer.invoke("app:open-external", url) as Promise<void>,
+  ping: () => ipcRenderer.invoke(desktopIpc.ping) as Promise<string>,
+  getState: () => ipcRenderer.invoke(desktopIpc.stateRequest) as Promise<DesktopAppState>,
+  onStateChanged: (listener: (state: DesktopAppState) => void) => {
+    const handle = (_event: Electron.IpcRendererEvent, state: DesktopAppState) => {
+      listener(state);
+    };
+    ipcRenderer.on(desktopIpc.stateChanged, handle);
+    return () => {
+      ipcRenderer.removeListener(desktopIpc.stateChanged, handle);
+    };
+  },
+  addWorkspacePath: (workspacePath: string) =>
+    ipcRenderer.invoke(desktopIpc.addWorkspacePath, workspacePath) as Promise<DesktopAppState>,
+  pickWorkspace: () => ipcRenderer.invoke(desktopIpc.pickWorkspace) as Promise<DesktopAppState>,
+  selectWorkspace: (workspaceId: string) =>
+    ipcRenderer.invoke(desktopIpc.selectWorkspace, workspaceId) as Promise<DesktopAppState>,
+  selectSession: (target: { workspaceId: string; sessionId: string }) =>
+    ipcRenderer.invoke(desktopIpc.selectSession, target) as Promise<DesktopAppState>,
+  createSession: (input: { workspaceId: string; title?: string }) =>
+    ipcRenderer.invoke(desktopIpc.createSession, input) as Promise<DesktopAppState>,
+  updateComposerDraft: (composerDraft: string) =>
+    ipcRenderer.invoke(desktopIpc.updateComposerDraft, composerDraft) as Promise<DesktopAppState>,
+  submitComposerDraft: () => ipcRenderer.invoke(desktopIpc.submitComposerDraft) as Promise<DesktopAppState>,
+  openExternal: (url: string) => ipcRenderer.invoke(desktopIpc.openExternal, url) as Promise<void>,
 });

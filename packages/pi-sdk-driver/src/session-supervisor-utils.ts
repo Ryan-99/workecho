@@ -1,5 +1,7 @@
 import { basename } from "node:path";
+import type { SessionInfo } from "@mariozechner/pi-coding-agent";
 import type { SessionErrorInfo, SessionRef, SessionSnapshot, SessionStatus, WorkspaceRef } from "@pi-app/session-driver";
+import type { SessionTranscriptMessage } from "./transcript.js";
 
 export interface SnapshotSource {
   readonly ref: SessionRef;
@@ -37,6 +39,33 @@ export function workspaceToRef(workspace: { workspaceId: string; path: string; d
 
 export function deriveWorkspaceTitle(workspace: WorkspaceRef): string {
   return workspace.displayName?.trim() || basename(workspace.path) || workspace.path;
+}
+
+export function createWorkspaceRef(path: string, displayName?: string): WorkspaceRef {
+  return {
+    workspaceId: path,
+    path,
+    ...(displayName ? { displayName } : {}),
+  };
+}
+
+export function titleFromSessionInfo(info: SessionInfo): string {
+  const preferred = info.name?.trim();
+  if (preferred) {
+    return preferred;
+  }
+
+  const firstMessage = truncate(info.firstMessage, 72);
+  if (firstMessage) {
+    return firstMessage;
+  }
+
+  return basename(info.cwd || info.path);
+}
+
+export function previewFromSessionInfo(info: SessionInfo): string | undefined {
+  const text = truncate(info.firstMessage || info.allMessagesText, 140);
+  return text || undefined;
 }
 
 export function nowIso(): string {
@@ -127,6 +156,51 @@ export function truncate(value: string, limit = 140): string {
   return `${normalized.slice(0, limit - 1)}…`;
 }
 
+export function transcriptFromMessages(messages: readonly unknown[], fallbackTimestamp = nowIso()): SessionTranscriptMessage[] {
+  const transcript: SessionTranscriptMessage[] = [];
+
+  for (const [index, message] of messages.entries()) {
+    if (!isRecord(message)) {
+      continue;
+    }
+
+    const role = message.role;
+    if (role !== "user" && role !== "assistant") {
+      continue;
+    }
+
+    const text = messageText(message);
+    if (!text) {
+      continue;
+    }
+
+    transcript.push({
+      id: typeof message.id === "string" ? message.id : `${role}-${index}`,
+      role,
+      text,
+      createdAt: typeof message.createdAt === "string" ? message.createdAt : fallbackTimestamp,
+    });
+  }
+
+  return transcript;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function messageText(message: Record<string, unknown>): string {
+  const { content } = message;
+  if (typeof content === "string") {
+    return content.trim();
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (isRecord(part) && part.type === "text" && typeof part.text === "string" ? part.text : ""))
+      .join(" ")
+      .trim();
+  }
+
+  return "";
 }

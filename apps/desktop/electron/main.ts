@@ -1,8 +1,13 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { DesktopAppStore } from "./app-store";
+import { desktopIpc } from "../src/ipc";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+let store: DesktopAppStore;
+let mainWindow: BrowserWindow | null = null;
+let stopPublishingState: (() => void) | undefined;
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -18,7 +23,7 @@ function createWindow(): BrowserWindow {
       preload: path.join(app.getAppPath(), "dist-electron", "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 
@@ -35,17 +40,70 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
+function attachStatePublisher(window: BrowserWindow): void {
+  stopPublishingState?.();
+  stopPublishingState = store.subscribe((state) => {
+    if (!window.isDestroyed()) {
+      window.webContents.send(desktopIpc.stateChanged, state);
+    }
+  });
+  window.once("closed", () => {
+    stopPublishingState?.();
+    stopPublishingState = undefined;
+    if (mainWindow === window) {
+      mainWindow = null;
+    }
+  });
+}
+
 app.setName("pi");
 
-app.whenReady().then(() => {
-  ipcMain.handle("app:ping", () => "pi desktop ready");
-  ipcMain.handle("app:open-external", (_event, url: string) => shell.openExternal(url));
+app.whenReady().then(async () => {
+  store = new DesktopAppStore({
+    userDataDir: app.getPath("userData"),
+    initialWorkspacePaths: [process.cwd()],
+  });
+  await store.initialize();
 
-  createWindow();
+  ipcMain.handle(desktopIpc.ping, () => "pi desktop ready");
+  ipcMain.handle(desktopIpc.openExternal, (_event, url: string) => {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error(`Refusing to open unsupported URL: ${url}`);
+    }
+    return shell.openExternal(url);
+  });
+  ipcMain.handle(desktopIpc.stateRequest, () => store.getState());
+  ipcMain.handle(desktopIpc.addWorkspacePath, (_event, workspacePath: string) => store.addWorkspace(workspacePath));
+  ipcMain.handle(desktopIpc.pickWorkspace, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+      title: "Open workspace folder",
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return store.getState();
+    }
+    return store.addWorkspace(result.filePaths[0] as string);
+  });
+  ipcMain.handle(desktopIpc.selectWorkspace, (_event, workspaceId: string) => store.selectWorkspace(workspaceId));
+  ipcMain.handle(desktopIpc.selectSession, (_event, target: { workspaceId: string; sessionId: string }) =>
+    store.selectSession(target),
+  );
+  ipcMain.handle(desktopIpc.createSession, (_event, input: { workspaceId: string; title?: string }) =>
+    store.createSession(input),
+  );
+  ipcMain.handle(desktopIpc.updateComposerDraft, (_event, composerDraft: string) =>
+    store.updateComposerDraft(composerDraft),
+  );
+  ipcMain.handle(desktopIpc.submitComposerDraft, () => store.submitComposerDraft());
+
+  mainWindow = createWindow();
+  attachStatePublisher(mainWindow);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      mainWindow = createWindow();
+      attachStatePublisher(mainWindow);
     }
   });
 });

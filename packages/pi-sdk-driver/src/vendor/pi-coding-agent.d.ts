@@ -68,6 +68,18 @@ declare module "@mariozechner/pi-coding-agent" {
     modelFallbackMessage?: string;
   }
 
+  export interface SessionInfo {
+    path: string;
+    id: string;
+    cwd: string;
+    name?: string;
+    created: Date;
+    modified: Date;
+    messageCount: number;
+    firstMessage: string;
+    allMessagesText: string;
+  }
+
   export class AgentSession {
     readonly sessionManager: SessionManager;
     readonly sessionId: string;
@@ -85,6 +97,7 @@ declare module "@mariozechner/pi-coding-agent" {
     static create(cwd: string, sessionDir?: string): SessionManager;
     static open(path: string, sessionDir?: string): SessionManager;
     static inMemory(cwd?: string): SessionManager;
+    static list(cwd: string, sessionDir?: string): Promise<SessionInfo[]>;
     getSessionId(): string;
     getSessionFile(): string | undefined;
     getSessionName(): string | undefined;
