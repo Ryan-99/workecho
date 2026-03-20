@@ -1,0 +1,25 @@
+{
+  "name": "@pi-app/pi-sdk-driver",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SDK-first session driver spike for pi-app.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.60.0",
+    "@pi-app/catalogs": "workspace:*",
+    "@pi-app/session-driver": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
