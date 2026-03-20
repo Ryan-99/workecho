@@ -17,6 +17,13 @@ export interface RunMetrics {
   fileCount: number;
 }
 
+interface TimelineRuntimeState {
+  readonly runMetricsBySession: Map<string, RunMetrics>;
+  readonly runningSinceBySession: Map<string, string>;
+  readonly activeAssistantMessageBySession: Map<string, string>;
+  readonly activeWorkingActivityBySession: Map<string, string>;
+}
+
 export function appendUserMessage(
   transcriptCache: Map<string, TranscriptMessage[]>,
   sessionRef: SessionRef,
@@ -71,8 +78,7 @@ export function clearActiveAssistantMessage(
 export function applyTimelineEvent(
   transcriptCache: Map<string, TranscriptMessage[]>,
   event: SessionDriverEvent,
-  runMetricsBySession: Map<string, RunMetrics>,
-  runningSinceBySession: Map<string, string>,
+  state: TimelineRuntimeState,
 ): void {
   if (event.type === "assistantDelta") {
     return;
@@ -80,25 +86,28 @@ export function applyTimelineEvent(
 
   const key = sessionKey(event.sessionRef);
   const transcript = [...(transcriptCache.get(key) ?? [])];
-  const currentMetrics = runMetricsBySession.get(key);
+  const currentMetrics = state.runMetricsBySession.get(key);
 
   switch (event.type) {
     case "sessionOpened":
       transcript.push(makeActivityItem("Resumed session", { metadata: relativeDetail(event.timestamp) }));
       break;
     case "sessionUpdated":
-      if (event.snapshot.status === "running" && event.snapshot.runningRunId && !runningSinceBySession.has(key)) {
-        runningSinceBySession.set(key, event.timestamp);
-        runMetricsBySession.set(key, {
+      if (event.snapshot.status === "running" && event.snapshot.runningRunId && !state.runningSinceBySession.has(key)) {
+        state.runningSinceBySession.set(key, event.timestamp);
+        state.runMetricsBySession.set(key, {
           startedAt: event.timestamp,
           toolCount: 0,
           searchCount: 0,
           fileCount: 0,
-        });
-        transcript.push(makeActivityItem("Working…"));
+        });        
+        const activity = makeActivityItem("Working…");
+        state.activeWorkingActivityBySession.set(key, activity.id);
+        transcript.push(activity);
       }
       break;
     case "toolStarted": {
+      clearActiveAssistantMessage(state.activeAssistantMessageBySession, event.sessionRef);
       const metrics = currentMetrics ?? {
         startedAt: event.timestamp,
         toolCount: 0,
@@ -112,7 +121,7 @@ export function applyTimelineEvent(
       if (looksLikeFileExplore(event.toolName, event.input)) {
         metrics.fileCount += 1;
       }
-      runMetricsBySession.set(key, metrics);
+      state.runMetricsBySession.set(key, metrics);
       upsertToolRow(transcript, event.callId, event.toolName, "running", toolLabel(event.toolName, event.input), undefined);
       break;
     }
@@ -131,10 +140,12 @@ export function applyTimelineEvent(
       break;
     case "runCompleted": {
       const metrics = currentMetrics;
-      runningSinceBySession.delete(key);
-      runMetricsBySession.delete(key);
+      clearRunState(transcript, key, event.sessionRef, state);
       if (metrics) {
-        transcript.push(makeSummaryItem(summaryLabel(metrics)));
+        const label = summaryLabel(metrics);
+        if (label) {
+          transcript.push(makeSummaryItem(label));
+        }
         transcript.push(makeSummaryItem(workedForLabel(metrics.startedAt, event.timestamp)));
       } else {
         transcript.push(makeSummaryItem("Completed", relativeDetail(event.timestamp)));
@@ -143,8 +154,7 @@ export function applyTimelineEvent(
     }
     case "runFailed": {
       const metrics = currentMetrics;
-      runningSinceBySession.delete(key);
-      runMetricsBySession.delete(key);
+      clearRunState(transcript, key, event.sessionRef, state);
       transcript.push(
         makeActivityItem(event.error.message, {
           tone: "error",
@@ -155,9 +165,8 @@ export function applyTimelineEvent(
       break;
     }
     case "sessionClosed":
+      clearRunState(transcript, key, event.sessionRef, state);
       transcript.push(makeActivityItem("Stopped", { metadata: relativeDetail(event.timestamp) }));
-      runningSinceBySession.delete(key);
-      runMetricsBySession.delete(key);
       break;
     case "hostUiRequest":
       transcript.push(makeActivityItem(hostUiLabel(event), { metadata: relativeDetail(event.timestamp) }));
@@ -203,6 +212,29 @@ function upsertToolRow(
 
 function trimTranscript(transcript: TranscriptMessage[]): TranscriptMessage[] {
   return transcript.slice(-TRANSCRIPT_HISTORY_LIMIT);
+}
+
+function removeWorkingActivity(transcript: TranscriptMessage[], activityId: string | undefined): void {
+  if (!activityId) {
+    return;
+  }
+  const index = transcript.findIndex((item) => item.kind === "activity" && item.id === activityId);
+  if (index >= 0) {
+    transcript.splice(index, 1);
+  }
+}
+
+function clearRunState(
+  transcript: TranscriptMessage[],
+  key: string,
+  sessionRef: SessionRef,
+  state: TimelineRuntimeState,
+): void {
+  clearActiveAssistantMessage(state.activeAssistantMessageBySession, sessionRef);
+  removeWorkingActivity(transcript, state.activeWorkingActivityBySession.get(key));
+  state.activeWorkingActivityBySession.delete(key);
+  state.runningSinceBySession.delete(key);
+  state.runMetricsBySession.delete(key);
 }
 
 function toolLabel(toolName: string, input: unknown): string {
@@ -262,7 +294,7 @@ function looksLikeFileExplore(toolName: string, input: unknown): boolean {
   return typeof input === "string" && /\/|\.md|\.ts|file/i.test(input);
 }
 
-function summaryLabel(metrics: RunMetrics): string {
+function summaryLabel(metrics: RunMetrics): string | undefined {
   const parts: string[] = [];
   if (metrics.fileCount > 0) {
     parts.push(`Explored ${metrics.fileCount} file${metrics.fileCount === 1 ? "" : "s"}`);
@@ -270,10 +302,10 @@ function summaryLabel(metrics: RunMetrics): string {
   if (metrics.searchCount > 0) {
     parts.push(`${metrics.searchCount} search${metrics.searchCount === 1 ? "" : "es"}`);
   }
-  if (parts.length === 0) {
+  if (parts.length === 0 && metrics.toolCount > 0) {
     parts.push(`Used ${metrics.toolCount} tool${metrics.toolCount === 1 ? "" : "s"}`);
   }
-  return parts.join(", ");
+  return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
 function workedForLabel(startedAt: string, endedAt: string): string {

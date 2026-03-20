@@ -57,6 +57,7 @@ export class DesktopAppStore {
   private readonly activeAssistantMessageBySession = new Map<string, string>();
   private readonly runningSinceBySession = new Map<string, string>();
   private readonly runMetricsBySession = new Map<string, RunMetrics>();
+  private readonly activeWorkingActivityBySession = new Map<string, string>();
   private readonly initialWorkspacePaths: readonly string[];
   private persistTimer: NodeJS.Timeout | undefined;
   private initPromise: Promise<void> | undefined;
@@ -367,6 +368,7 @@ export class DesktopAppStore {
         this.activeAssistantMessageBySession.delete(key);
         this.runningSinceBySession.delete(key);
         this.runMetricsBySession.delete(key);
+        this.activeWorkingActivityBySession.delete(key);
         this.transcriptCache.delete(key);
       }
     }
@@ -393,15 +395,19 @@ export class DesktopAppStore {
 
   private async ensureTranscriptLoaded(sessionRef: SessionRef): Promise<void> {
     const key = sessionKey(sessionRef);
-    if (this.transcriptCache.has(key)) {
+    const cached = this.transcriptCache.get(key);
+    if (cached && cached.length > 0) {
       return;
     }
 
     const transcript = await this.driver.getTranscript(sessionRef);
-    this.transcriptCache.set(
-      key,
-      transcript.map(cloneTranscriptMessage),
-    );
+    if (transcript.length > 0) {
+      this.transcriptCache.set(key, transcript.map(cloneTranscriptMessage));
+      return;
+    }
+    if (!cached) {
+      this.transcriptCache.set(key, []);
+    }
   }
 
   private async ensureSessionSubscribed(sessionRef: SessionRef): Promise<void> {
@@ -424,7 +430,6 @@ export class DesktopAppStore {
         appendAssistantDelta(this.transcriptCache, this.activeAssistantMessageBySession, event.sessionRef, event.text);
         break;
       case "runFailed":
-        clearActiveAssistantMessage(this.activeAssistantMessageBySession, event.sessionRef);
         this.state = {
           ...this.state,
           lastError: event.error.message,
@@ -432,8 +437,6 @@ export class DesktopAppStore {
         break;
       case "runCompleted":
       case "sessionClosed":
-        clearActiveAssistantMessage(this.activeAssistantMessageBySession, event.sessionRef);
-        break;
       case "sessionOpened":
       case "sessionUpdated":
       case "toolStarted":
@@ -450,7 +453,12 @@ export class DesktopAppStore {
       this.sessionSubscriptions.delete(key);
     }
 
-    applyTimelineEvent(this.transcriptCache, event, this.runMetricsBySession, this.runningSinceBySession);
+    applyTimelineEvent(this.transcriptCache, event, {
+      runMetricsBySession: this.runMetricsBySession,
+      runningSinceBySession: this.runningSinceBySession,
+      activeAssistantMessageBySession: this.activeAssistantMessageBySession,
+      activeWorkingActivityBySession: this.activeWorkingActivityBySession,
+    });
     this.state = applySessionEventState(this.state, event, this.transcriptCache, this.runningSinceBySession);
     this.state = {
       ...this.state,

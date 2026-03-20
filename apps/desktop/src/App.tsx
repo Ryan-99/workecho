@@ -162,13 +162,20 @@ export default function App() {
   }
 
   const submitComposerDraft = () => {
+    if (!composerDraft.trim()) {
+      return;
+    }
+    const previousDraft = composerDraft;
+    setComposerDraft("");
     void (async () => {
-      if (composerDraft !== snapshot.composerDraft) {
-        await updateSnapshot(api, setSnapshot, () => api.updateComposerDraft(composerDraft));
+      if (previousDraft !== snapshot.composerDraft) {
+        await updateSnapshot(api, setSnapshot, () => api.updateComposerDraft(previousDraft));
       }
       const nextState = await updateSnapshot(api, setSnapshot, () => api.submitComposerDraft());
       setComposerDraft(nextState.composerDraft);
-    })();
+    })().catch(() => {
+      setComposerDraft(previousDraft);
+    });
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
