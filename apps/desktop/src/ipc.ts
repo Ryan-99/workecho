@@ -6,6 +6,7 @@ export const desktopIpc = {
   addWorkspacePath: "pi-app:add-workspace-path",
   pickWorkspace: "pi-app:pick-workspace",
   selectWorkspace: "pi-app:select-workspace",
+  syncCurrentWorkspace: "pi-app:sync-current-workspace",
   selectSession: "pi-app:select-session",
   createSession: "pi-app:create-session",
   updateComposerDraft: "pi-app:update-composer-draft",
@@ -25,6 +26,7 @@ export interface PiDesktopApi {
   addWorkspacePath(path: string): Promise<DesktopAppState>;
   pickWorkspace(): Promise<DesktopAppState>;
   selectWorkspace(workspaceId: string): Promise<DesktopAppState>;
+  syncCurrentWorkspace(): Promise<DesktopAppState>;
   selectSession(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
   createSession(input: CreateSessionInput): Promise<DesktopAppState>;
   updateComposerDraft(composerDraft: string): Promise<DesktopAppState>;

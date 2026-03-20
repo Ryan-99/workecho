@@ -259,7 +259,7 @@ export default function App() {
               className="chip chip--ghost"
               type="button"
               onClick={() => {
-                void api.getState().then(setSnapshot);
+                void updateSnapshot(api, setSnapshot, () => api.syncCurrentWorkspace());
               }}
             >
               Sync

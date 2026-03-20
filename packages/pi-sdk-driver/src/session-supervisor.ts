@@ -92,11 +92,33 @@ export class SessionSupervisor {
   async syncWorkspace(path: string, displayName?: string): Promise<SyncWorkspaceResult> {
     const workspace = await this.registerWorkspace(path, displayName);
     const infos = await SessionManager.list(path);
+    const discoveredKeys = new Set<string>();
 
     for (const info of infos) {
       const entry = this.sessionEntryFromInfo(workspace, info);
+      discoveredKeys.add(sessionKey(entry.sessionRef));
       await this.catalogs.sessions.upsertSession(entry);
       await this.catalogs.setSessionFile(entry.sessionRef, info.path);
+    }
+
+    const existingSessions = (await this.catalogs.sessions.listSessions(workspace.workspaceId)).sessions;
+    for (const session of existingSessions) {
+      const key = sessionKey(session.sessionRef);
+      if (discoveredKeys.has(key)) {
+        continue;
+      }
+
+      await this.catalogs.sessions.deleteSession(session.sessionRef);
+      const record = this.records.get(key);
+      if (!record) {
+        continue;
+      }
+
+      record.unsubscribeAgent?.();
+      record.unsubscribeAgent = undefined;
+      record.listeners.clear();
+      record.session?.dispose();
+      this.records.delete(key);
     }
 
     return {

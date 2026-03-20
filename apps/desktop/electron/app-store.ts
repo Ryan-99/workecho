@@ -120,17 +120,9 @@ export class DesktopAppStore {
       return this.emit();
     }
 
-    const firstSession = workspace.sessions[0];
-    if (firstSession) {
-      await this.ensureSessionReady({
-        workspaceId,
-        sessionId: firstSession.id,
-      });
-    }
-
-    return this.refreshState({
+    return this.syncWorkspace(workspaceId, {
       selectedWorkspaceId: workspaceId,
-      selectedSessionId: firstSession?.id ?? "",
+      selectedSessionId: workspace.sessions[0]?.id ?? "",
       clearLastError: true,
     });
   }
@@ -291,6 +283,19 @@ export class DesktopAppStore {
     return this.emit();
   }
 
+  async syncCurrentWorkspace(): Promise<DesktopAppState> {
+    await this.initialize();
+    if (!this.state.selectedWorkspaceId) {
+      return this.refreshState({ clearLastError: true });
+    }
+
+    return this.syncWorkspace(this.state.selectedWorkspaceId, {
+      selectedWorkspaceId: this.state.selectedWorkspaceId,
+      selectedSessionId: this.state.selectedSessionId,
+      clearLastError: true,
+    });
+  }
+
   private async pruneStaleSessionSubscriptions(sessions: readonly SessionCatalogEntry[]): Promise<void> {
     const activeKeys = new Set(sessions.map((session) => sessionKey(session.sessionRef)));
     for (const [key, unsubscribe] of this.sessionSubscriptions) {
@@ -298,7 +303,22 @@ export class DesktopAppStore {
         unsubscribe();
         this.sessionSubscriptions.delete(key);
         this.activeAssistantMessageBySession.delete(key);
+        this.transcriptCache.delete(key);
       }
+    }
+  }
+
+  private async syncWorkspace(workspaceId: string, refreshOptions: RefreshStateOptions): Promise<DesktopAppState> {
+    const workspace = this.state.workspaces.find((entry) => entry.id === workspaceId);
+    if (!workspace) {
+      return this.emit();
+    }
+
+    try {
+      await this.driver.syncWorkspace(workspace.path, workspace.name);
+      return this.refreshState(refreshOptions);
+    } catch (error) {
+      return this.withError(error);
     }
   }
 

@@ -89,6 +89,7 @@ app.whenReady().then(async () => {
     return store.addWorkspace(result.filePaths[0] as string);
   });
   ipcMain.handle(desktopIpc.selectWorkspace, (_event, workspaceId: string) => store.selectWorkspace(workspaceId));
+  ipcMain.handle(desktopIpc.syncCurrentWorkspace, () => store.syncCurrentWorkspace());
   ipcMain.handle(desktopIpc.selectSession, (_event, target: { workspaceId: string; sessionId: string }) =>
     store.selectSession(target),
   );
