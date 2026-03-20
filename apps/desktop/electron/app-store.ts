@@ -53,6 +53,8 @@ export class DesktopAppStore {
   private readonly driver: PiSdkDriver;
   private readonly uiStateFilePath: string;
   private readonly transcriptCache = new Map<string, TranscriptMessage[]>();
+  private readonly composerDraftsBySession = new Map<string, string>();
+  private readonly sessionErrorsBySession = new Map<string, string>();
   private readonly sessionSubscriptions = new Map<string, () => void>();
   private readonly activeAssistantMessageBySession = new Map<string, string>();
   private readonly runningSinceBySession = new Map<string, string>();
@@ -198,6 +200,15 @@ export class DesktopAppStore {
 
   async updateComposerDraft(composerDraft: string): Promise<DesktopAppState> {
     await this.initialize();
+    const sessionRef = this.selectedSessionRef();
+    if (sessionRef) {
+      const key = sessionKey(sessionRef);
+      if (composerDraft) {
+        this.composerDraftsBySession.set(key, composerDraft);
+      } else {
+        this.composerDraftsBySession.delete(key);
+      }
+    }
     this.state = {
       ...this.state,
       composerDraft,
@@ -226,15 +237,19 @@ export class DesktopAppStore {
     }
     const transcript = appendUserMessage(this.transcriptCache, sessionRef, text);
     clearActiveAssistantMessage(this.activeAssistantMessageBySession, sessionRef);
+    this.sessionErrorsBySession.delete(key);
+    this.composerDraftsBySession.delete(key);
 
     try {
       await this.driver.sendUserMessage(sessionRef, { text });
       return this.refreshState({
-        composerDraft: "",
         clearLastError: true,
       });
     } catch (error) {
       this.transcriptCache.set(key, transcript.slice(0, -1));
+      if (textInput) {
+        this.composerDraftsBySession.set(key, textInput);
+      }
       return this.withError(error);
     }
   }
@@ -249,6 +264,7 @@ export class DesktopAppStore {
     try {
       await this.driver.cancelCurrentRun(sessionRef);
       clearActiveAssistantMessage(this.activeAssistantMessageBySession, sessionRef);
+      this.sessionErrorsBySession.delete(sessionKey(sessionRef));
       this.state = {
         ...this.state,
         lastError: undefined,
@@ -272,6 +288,12 @@ export class DesktopAppStore {
           this.loadedTranscriptKeys.add(key);
         }
       }
+      this.composerDraftsBySession.clear();
+      for (const [key, draft] of Object.entries(persisted.composerDraftsBySession ?? {})) {
+        if (draft) {
+          this.composerDraftsBySession.set(key, draft);
+        }
+      }
 
       for (const workspacePath of this.initialWorkspacePaths) {
         if (!workspacePath.trim()) {
@@ -288,7 +310,7 @@ export class DesktopAppStore {
       await this.refreshState({
         selectedWorkspaceId: persisted.selectedWorkspaceId,
         selectedSessionId: persisted.selectedSessionId,
-        composerDraft: persisted.composerDraft ?? "",
+        composerDraft: persisted.composerDraft,
         clearLastError: true,
       });
     } catch (error) {
@@ -309,6 +331,7 @@ export class DesktopAppStore {
     ]);
 
     await this.pruneStaleSessionSubscriptions(sessionsSnapshot.sessions);
+    await this.ensureSubscriptionsForSessions(sessionsSnapshot.sessions);
 
     let workspaces = buildWorkspaceRecords(
       workspacesSnapshot.workspaces,
@@ -344,8 +367,8 @@ export class DesktopAppStore {
       workspaces,
       selectedWorkspaceId,
       selectedSessionId,
-      composerDraft: options.composerDraft ?? this.state.composerDraft,
-      lastError: options.clearLastError ? undefined : this.state.lastError,
+      composerDraft: this.resolveComposerDraft(selectedWorkspaceId, selectedSessionId, options.composerDraft),
+      lastError: this.resolveSelectedSessionError(selectedWorkspaceId, selectedSessionId, options.clearLastError),
       revision: this.state.revision + 1,
     };
 
@@ -376,9 +399,20 @@ export class DesktopAppStore {
         this.runningSinceBySession.delete(key);
         this.runMetricsBySession.delete(key);
         this.activeWorkingActivityBySession.delete(key);
+        this.composerDraftsBySession.delete(key);
+        this.sessionErrorsBySession.delete(key);
         this.loadedTranscriptKeys.delete(key);
         this.transcriptCache.delete(key);
       }
+    }
+  }
+
+  private async ensureSubscriptionsForSessions(sessions: readonly SessionCatalogEntry[]): Promise<void> {
+    for (const session of sessions) {
+      if (session.status !== "running") {
+        continue;
+      }
+      await this.ensureSessionReady(session.sessionRef);
     }
   }
 
@@ -455,6 +489,12 @@ export class DesktopAppStore {
       this.sessionSubscriptions.delete(key);
     }
 
+    if (event.type === "runFailed") {
+      this.sessionErrorsBySession.set(key, event.error.message);
+    } else if (event.type === "runCompleted" || event.type === "sessionClosed") {
+      this.sessionErrorsBySession.delete(key);
+    }
+
     applyTimelineEvent(this.transcriptCache, event, {
       runMetricsBySession: this.runMetricsBySession,
       runningSinceBySession: this.runningSinceBySession,
@@ -464,7 +504,7 @@ export class DesktopAppStore {
     this.state = applySessionEventState(this.state, event, this.transcriptCache, this.runningSinceBySession);
     this.state = {
       ...this.state,
-      lastError: event.type === "runFailed" ? event.error.message : this.state.lastError,
+      lastError: this.resolveSelectedSessionError(this.state.selectedWorkspaceId, this.state.selectedSessionId, false),
     };
     if (event.type === "runCompleted" || event.type === "runFailed" || event.type === "sessionClosed") {
       await this.persistUiState();
@@ -511,6 +551,7 @@ export class DesktopAppStore {
       selectedWorkspaceId: this.state.selectedWorkspaceId || undefined,
       selectedSessionId: this.state.selectedSessionId || undefined,
       composerDraft: this.state.composerDraft || undefined,
+      composerDraftsBySession: Object.fromEntries(this.composerDraftsBySession.entries()),
       transcripts: Object.fromEntries(
         [...this.transcriptCache.entries()].map(([key, transcript]) => [key, transcript.slice(-TRANSCRIPT_HISTORY_LIMIT)]),
       ),
@@ -540,6 +581,10 @@ export class DesktopAppStore {
 
   private async withError(error: unknown): Promise<DesktopAppState> {
     const message = error instanceof Error ? error.message : String(error);
+    const sessionRef = this.selectedSessionRef();
+    if (sessionRef) {
+      this.sessionErrorsBySession.set(sessionKey(sessionRef), message);
+    }
     this.state = {
       ...this.state,
       lastError: message,
@@ -547,5 +592,47 @@ export class DesktopAppStore {
     };
     await this.persistUiState();
     return this.emit();
+  }
+
+  private resolveComposerDraft(
+    selectedWorkspaceId: string,
+    selectedSessionId: string,
+    explicitDraft?: string,
+  ): string {
+    if (explicitDraft !== undefined) {
+      if (selectedWorkspaceId && selectedSessionId) {
+        const key = sessionKey({ workspaceId: selectedWorkspaceId, sessionId: selectedSessionId });
+        if (explicitDraft) {
+          this.composerDraftsBySession.set(key, explicitDraft);
+        } else {
+          this.composerDraftsBySession.delete(key);
+        }
+      }
+      return explicitDraft;
+    }
+
+    if (!selectedWorkspaceId || !selectedSessionId) {
+      return "";
+    }
+
+    return this.composerDraftsBySession.get(sessionKey({ workspaceId: selectedWorkspaceId, sessionId: selectedSessionId })) ?? "";
+  }
+
+  private resolveSelectedSessionError(
+    selectedWorkspaceId: string,
+    selectedSessionId: string,
+    clearLastError?: boolean,
+  ): string | undefined {
+    if (!selectedWorkspaceId || !selectedSessionId) {
+      return undefined;
+    }
+
+    const key = sessionKey({ workspaceId: selectedWorkspaceId, sessionId: selectedSessionId });
+    if (clearLastError) {
+      this.sessionErrorsBySession.delete(key);
+      return undefined;
+    }
+
+    return this.sessionErrorsBySession.get(key);
   }
 }

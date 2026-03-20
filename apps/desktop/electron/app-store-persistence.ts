@@ -6,6 +6,7 @@ export interface PersistedUiState {
   readonly selectedWorkspaceId?: string;
   readonly selectedSessionId?: string;
   readonly composerDraft?: string;
+  readonly composerDraftsBySession?: Record<string, string>;
   readonly transcripts?: Record<string, readonly TranscriptMessage[]>;
 }
 
@@ -17,6 +18,7 @@ export async function readPersistedUiState(uiStateFilePath: string): Promise<Per
       selectedWorkspaceId: parsed.selectedWorkspaceId,
       selectedSessionId: parsed.selectedSessionId,
       composerDraft: parsed.composerDraft ?? "",
+      composerDraftsBySession: parsed.composerDraftsBySession,
       transcripts: parsed.transcripts,
     };
   } catch {

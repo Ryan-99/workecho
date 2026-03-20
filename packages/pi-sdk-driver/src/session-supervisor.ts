@@ -93,7 +93,15 @@ export class SessionSupervisor {
     const workspace = await this.registerWorkspace(path, displayName);
     const infos = await SessionManager.list(path);
     const existingSessions = (await this.catalogs.sessions.listSessions(workspace.workspaceId)).sessions;
-    const nextEntries = infos.map((info) => this.sessionEntryFromInfo(workspace, info));
+    const existingByKey = new Map(existingSessions.map((session) => [sessionKey(session.sessionRef), session]));
+    const nextEntries = infos.map((info) =>
+      this.sessionEntryFromInfo(
+        workspace,
+        info,
+        this.records.get(sessionKey({ workspaceId: workspace.workspaceId, sessionId: info.id })),
+        existingByKey.get(sessionKey({ workspaceId: workspace.workspaceId, sessionId: info.id })),
+      ),
+    );
     const discoveredKeys = new Set(nextEntries.map((entry) => sessionKey(entry.sessionRef)));
     const nextSessionFiles = Object.fromEntries(nextEntries.map((entry, index) => [sessionKey(entry.sessionRef), infos[index]?.path ?? ""]));
 
@@ -513,20 +521,27 @@ export class SessionSupervisor {
     });
   }
 
-  private sessionEntryFromInfo(workspace: WorkspaceRef, info: SessionInfo) {
-    const preview = previewFromSessionInfo(info);
-    return {
+  private sessionEntryFromInfo(
+    workspace: WorkspaceRef,
+    info: SessionInfo,
+    runtimeRecord?: ManagedSessionRecord,
+    existingEntry?: SessionCatalogSnapshot["sessions"][number],
+  ) {
+    const runtimeSnapshot =
+      runtimeRecord && runtimeRecord.session && !runtimeRecord.closed ? buildSnapshot(runtimeRecord) : undefined;
+    const previewSnippet = runtimeSnapshot?.preview ?? previewFromSessionInfo(info);
+    const entry = {
       sessionRef: {
         workspaceId: workspace.workspaceId,
         sessionId: info.id,
       },
       workspaceId: workspace.workspaceId,
-      title: titleFromSessionInfo(info),
-      updatedAt: info.modified.toISOString(),
-      status: "idle" as const,
-      ...(preview ? { previewSnippet: preview } : {}),
+      title: runtimeSnapshot?.title ?? existingEntry?.title ?? titleFromSessionInfo(info),
+      updatedAt: runtimeSnapshot?.updatedAt ?? info.modified.toISOString(),
+      status: runtimeSnapshot?.status ?? "idle",
       sessionFilePath: info.path,
     };
+    return previewSnippet !== undefined ? { ...entry, previewSnippet } : entry;
   }
 }
 
