@@ -92,7 +92,11 @@ export class DesktopAppStore {
 
     const existing = this.state.workspaces.find((workspace) => workspace.path === normalizedPath);
     if (existing) {
-      return this.selectWorkspace(existing.id);
+      return this.syncWorkspace(existing.id, {
+        selectedWorkspaceId: existing.id,
+        selectedSessionId: this.state.selectedSessionId,
+        clearLastError: true,
+      });
     }
 
     try {
@@ -120,7 +124,14 @@ export class DesktopAppStore {
       return this.emit();
     }
 
-    const firstSession = workspace.sessions[0];
+    const syncedState = await this.syncWorkspace(workspaceId, {
+      selectedWorkspaceId: workspaceId,
+      selectedSessionId: this.state.selectedSessionId,
+      clearLastError: true,
+    });
+    const syncedWorkspace = syncedState.workspaces.find((entry) => entry.id === workspaceId);
+
+    const firstSession = syncedWorkspace?.sessions[0];
     if (firstSession) {
       await this.ensureSessionReady({
         workspaceId,
@@ -231,6 +242,11 @@ export class DesktopAppStore {
           continue;
         }
         await this.driver.syncWorkspace(workspacePath);
+      }
+
+      const knownWorkspaces = await this.driver.listWorkspaces();
+      for (const workspace of knownWorkspaces.workspaces) {
+        await this.driver.syncWorkspace(workspace.path, workspace.displayName);
       }
 
       await this.refreshState({

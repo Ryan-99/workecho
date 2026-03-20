@@ -90,7 +90,7 @@
 
 .timeline {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   max-width: 1040px;
   width: 100%;
 }
@@ -121,6 +121,7 @@
   border-radius: 10px;
   border: 1px solid #e1e4eb;
   background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .message--assistant {
@@ -157,6 +158,81 @@
 .message p {
   color: var(--text-strong);
   font-size: 15px;
+}
+
+.message__content {
+  color: var(--text-strong);
+  display: grid;
+  gap: 10px;
+}
+
+.message__content > :first-child {
+  margin-top: 0;
+}
+
+.message__content > :last-child {
+  margin-bottom: 0;
+}
+
+.message__content p,
+.message__content ul,
+.message__content ol,
+.message__content pre,
+.message__content blockquote {
+  margin: 0;
+}
+
+.message__content ul,
+.message__content ol {
+  padding-left: 20px;
+}
+
+.message__content li + li {
+  margin-top: 4px;
+}
+
+.message__content code {
+  font-family:
+    "SF Mono",
+    "JetBrains Mono",
+    ui-monospace,
+    monospace;
+  font-size: 0.92em;
+}
+
+.message__content :not(pre) > code {
+  padding: 0.1em 0.38em;
+  border-radius: 6px;
+  background: #eef2f8;
+  color: #2c3550;
+}
+
+.message__content pre {
+  padding: 12px 14px;
+  border-radius: 10px;
+  overflow: auto;
+  background: #1f2433;
+  color: #eef2ff;
+  border: 1px solid #2d3448;
+}
+
+.message__content pre code {
+  color: inherit;
+}
+
+.message__content blockquote {
+  padding-left: 12px;
+  border-left: 3px solid #d8deea;
+  color: var(--muted-strong);
+}
+
+.message__content a {
+  color: #3358d4;
+  text-decoration: none;
+}
+
+.message__content a:hover {
+  text-decoration: underline;
 }
 
 .composer {
