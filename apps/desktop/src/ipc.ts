@@ -6,6 +6,9 @@ export const desktopIpc = {
   addWorkspacePath: "pi-app:add-workspace-path",
   pickWorkspace: "pi-app:pick-workspace",
   selectWorkspace: "pi-app:select-workspace",
+  renameWorkspace: "pi-app:rename-workspace",
+  removeWorkspace: "pi-app:remove-workspace",
+  openWorkspaceInFinder: "pi-app:open-workspace-in-finder",
   syncCurrentWorkspace: "pi-app:sync-current-workspace",
   selectSession: "pi-app:select-session",
   createSession: "pi-app:create-session",
@@ -30,6 +33,9 @@ export interface PiDesktopApi {
   addWorkspacePath(path: string): Promise<DesktopAppState>;
   pickWorkspace(): Promise<DesktopAppState>;
   selectWorkspace(workspaceId: string): Promise<DesktopAppState>;
+  renameWorkspace(workspaceId: string, displayName: string): Promise<DesktopAppState>;
+  removeWorkspace(workspaceId: string): Promise<DesktopAppState>;
+  openWorkspaceInFinder(workspaceId: string): Promise<void>;
   syncCurrentWorkspace(): Promise<DesktopAppState>;
   selectSession(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
   createSession(input: CreateSessionInput): Promise<DesktopAppState>;

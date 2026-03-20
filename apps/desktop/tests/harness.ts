@@ -15,10 +15,16 @@ export interface DesktopHarness {
   close(): Promise<void>;
 }
 
+export interface LaunchDesktopOptions {
+  readonly initialWorkspaces?: readonly string[];
+  readonly notificationLogPath?: string;
+}
+
 export async function launchDesktop(
   userDataDir: string,
-  initialWorkspaces: readonly string[] = [],
+  options: readonly string[] | LaunchDesktopOptions = [],
 ): Promise<DesktopHarness> {
+  const normalized = Array.isArray(options) ? { initialWorkspaces: options } : options;
   const port = await reservePort();
   const electronBinary = await resolveElectronBinary();
   const processHandle = spawn(electronBinary, [`--remote-debugging-port=${port}`, desktopDir], {
@@ -26,7 +32,8 @@ export async function launchDesktop(
     env: {
       ...process.env,
       PI_APP_USER_DATA_DIR: userDataDir,
-      PI_APP_INITIAL_WORKSPACES: initialWorkspaces.join(delimiter),
+      PI_APP_INITIAL_WORKSPACES: (normalized.initialWorkspaces ?? []).join(delimiter),
+      ...(normalized.notificationLogPath ? { PI_APP_NOTIFICATION_LOG_PATH: normalized.notificationLogPath } : {}),
       PI_APP_OPEN_DEVTOOLS: "0",
     },
     stdio: ["ignore", "pipe", "pipe"],

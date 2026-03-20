@@ -93,6 +93,8 @@ declare module "@mariozechner/pi-coding-agent" {
     readonly messages: readonly unknown[];
     subscribe(listener: AgentSessionEventListener): () => void;
     sendUserMessage(content: string | readonly unknown[], options?: { deliverAs?: "steer" | "followUp" }): Promise<void>;
+    compact(customInstructions?: string): Promise<unknown>;
+    reload(): Promise<void>;
     abort(): Promise<void>;
     dispose(): void;
   }

@@ -114,7 +114,17 @@ export default function App() {
   const [snapshot, setSnapshot] = useDesktopAppState();
   const [composerDraft, setComposerDraft] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
+  const [workspaceMenuId, setWorkspaceMenuId] = useState<string | null>(null);
+  const [workspaceRenameId, setWorkspaceRenameId] = useState<string | null>(null);
+  const [workspaceRenameDraft, setWorkspaceRenameDraft] = useState("");
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const timelinePaneRef = useRef<HTMLDivElement | null>(null);
+  const lastTranscriptMarkerRef = useRef("");
+  const pinnedToBottomRef = useRef(true);
+  const workspaceMenuWrapRef = useRef<HTMLSpanElement | null>(null);
+  const workspaceRenamePanelRef = useRef<HTMLFormElement | null>(null);
+  const workspaceRenameInputRef = useRef<HTMLInputElement | null>(null);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const api = window.piApp;
 
   const selectedWorkspace = snapshot ? (getSelectedWorkspace(snapshot) ?? snapshot.workspaces[0]) : undefined;
@@ -148,6 +158,51 @@ export default function App() {
   }, [slashQuery]);
 
   useEffect(() => {
+    setShowJumpToLatest(false);
+    lastTranscriptMarkerRef.current = "";
+    pinnedToBottomRef.current = true;
+  }, [selectedSessionKey]);
+
+  useEffect(() => {
+    if (!workspaceRenameId) {
+      return undefined;
+    }
+
+    workspaceRenameInputRef.current?.focus();
+    workspaceRenameInputRef.current?.select();
+    return undefined;
+  }, [workspaceRenameId]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      const menuContains = workspaceMenuWrapRef.current?.contains(target) ?? false;
+      const renamePanelContains = workspaceRenamePanelRef.current?.contains(target) ?? false;
+      if (!menuContains && !renamePanelContains) {
+        setWorkspaceMenuId(null);
+        setWorkspaceRenameId(null);
+      }
+    };
+
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setWorkspaceMenuId(null);
+        setWorkspaceRenameId(null);
+      }
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!api || !snapshot || composerDraft === snapshot.composerDraft) {
       return undefined;
     }
@@ -170,6 +225,27 @@ export default function App() {
     composer.style.height = "0px";
     composer.style.height = `${Math.min(composer.scrollHeight, 220)}px`;
   }, [composerDraft]);
+
+  useEffect(() => {
+    const pane = timelinePaneRef.current;
+    if (!pane || !selectedSession) {
+      return;
+    }
+
+    const marker = `${selectedSessionKey}:${selectedSession.transcript.length}:${selectedSession.transcript.at(-1)?.id ?? ""}`;
+    if (marker === lastTranscriptMarkerRef.current) {
+      return;
+    }
+    lastTranscriptMarkerRef.current = marker;
+
+    if (pinnedToBottomRef.current) {
+      pane.scrollTop = pane.scrollHeight;
+      setShowJumpToLatest(false);
+      return;
+    }
+
+    setShowJumpToLatest(true);
+  }, [selectedSession, selectedSessionKey]);
 
   if (!api || !snapshot) {
     return (
@@ -213,6 +289,63 @@ export default function App() {
 
   const handleRemoveImage = (attachmentId: string) => {
     void updateSnapshot(api, setSnapshot, () => api.removeComposerImage(attachmentId));
+  };
+
+  const handleWorkspaceRenameStart = (workspace: WorkspaceRecord) => {
+    setWorkspaceMenuId(null);
+    setWorkspaceRenameId(workspace.id);
+    setWorkspaceRenameDraft(workspace.name);
+  };
+
+  const handleWorkspaceRenameSubmit = (workspace: WorkspaceRecord) => {
+    const nextName = workspaceRenameDraft.trim();
+    setWorkspaceMenuId(null);
+    setWorkspaceRenameId(null);
+    if (!nextName || nextName === workspace.name) {
+      setWorkspaceRenameDraft("");
+      return;
+    }
+    setWorkspaceRenameDraft("");
+    void updateSnapshot(api, setSnapshot, () => api.renameWorkspace(workspace.id, nextName));
+  };
+
+  const handleWorkspaceRemove = (workspace: WorkspaceRecord) => {
+    const confirmed = window.confirm(`Remove ${workspace.name} from pi-app? This will not delete any files.`);
+    setWorkspaceMenuId(null);
+    setWorkspaceRenameId(null);
+    if (!confirmed) {
+      return;
+    }
+    void updateSnapshot(api, setSnapshot, () => api.removeWorkspace(workspace.id));
+  };
+
+  const handleWorkspaceRenameCancel = () => {
+    setWorkspaceRenameId(null);
+    setWorkspaceRenameDraft("");
+  };
+
+  const handleTimelineScroll = () => {
+    const pane = timelinePaneRef.current;
+    if (!pane) {
+      return;
+    }
+
+    const pinned = isNearBottom(pane);
+    pinnedToBottomRef.current = pinned;
+    if (pinned) {
+      setShowJumpToLatest(false);
+    }
+  };
+
+  const jumpToLatest = () => {
+    const pane = timelinePaneRef.current;
+    if (!pane) {
+      return;
+    }
+
+    pane.scrollTop = pane.scrollHeight;
+    pinnedToBottomRef.current = true;
+    setShowJumpToLatest(false);
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -317,19 +450,112 @@ export default function App() {
                 const workspaceActive = workspace.id === selectedWorkspace?.id;
                 return (
                   <section key={workspace.id} className="workspace-group">
-                    <button
-                      className={`workspace-row ${workspaceActive ? "workspace-row--active" : ""}`}
-                      onClick={() => {
-                        void updateSnapshot(api, setSnapshot, () => api.selectWorkspace(workspace.id));
-                      }}
-                      type="button"
-                    >
-                      <span className="workspace-row__icon" aria-hidden="true">
-                        <FolderIcon />
+                    <div className={`workspace-row ${workspaceActive ? "workspace-row--active" : ""}`}>
+                      <button
+                        className="workspace-row__select"
+                        onClick={() => {
+                          void updateSnapshot(api, setSnapshot, () => api.selectWorkspace(workspace.id));
+                        }}
+                        type="button"
+                      >
+                        <span className="workspace-row__icon" aria-hidden="true">
+                          <FolderIcon />
+                        </span>
+                        <span className="workspace-row__name">{workspace.name}</span>
+                        <span className="workspace-row__time">{formatRelativeTime(workspace.lastOpenedAt)}</span>
+                      </button>
+                      <span
+                        className="workspace-row__menu-wrap"
+                        ref={workspaceMenuId === workspace.id ? workspaceMenuWrapRef : undefined}
+                      >
+                        <button
+                          aria-label={`Workspace actions for ${workspace.name}`}
+                          aria-haspopup="menu"
+                          className="icon-button workspace-row__menu-button"
+                          aria-expanded={workspaceMenuId === workspace.id}
+                          type="button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setWorkspaceMenuId((current) => (current === workspace.id ? null : workspace.id));
+                          }}
+                        >
+                          …
+                        </button>
+                        {workspaceMenuId === workspace.id ? (
+                          <div className="workspace-menu">
+                            <button
+                              className="workspace-menu__item"
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setWorkspaceMenuId(null);
+                                void api.openWorkspaceInFinder(workspace.id);
+                              }}
+                            >
+                              Open in Finder
+                            </button>
+                            <button
+                              className="workspace-menu__item"
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleWorkspaceRenameStart(workspace);
+                              }}
+                            >
+                              Edit name
+                            </button>
+                            <button
+                              className="workspace-menu__item workspace-menu__item--danger"
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleWorkspaceRemove(workspace);
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ) : null}
                       </span>
-                      <span className="workspace-row__name">{workspace.name}</span>
-                      <span className="workspace-row__time">{formatRelativeTime(workspace.lastOpenedAt)}</span>
-                    </button>
+                    </div>
+                    {workspaceRenameId === workspace.id ? (
+                      <form
+                        className="workspace-rename"
+                        ref={workspaceRenamePanelRef}
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          handleWorkspaceRenameSubmit(workspace);
+                        }}
+                      >
+                        <input
+                          aria-label={`Rename ${workspace.name}`}
+                          className="workspace-rename__input"
+                          ref={workspaceRenameInputRef}
+                          value={workspaceRenameDraft}
+                          onChange={(event) => {
+                            setWorkspaceRenameDraft(event.target.value);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              handleWorkspaceRenameCancel();
+                            }
+                          }}
+                        />
+                        <div className="workspace-rename__actions">
+                          <button className="workspace-rename__button" type="button" onClick={handleWorkspaceRenameCancel}>
+                            Cancel
+                          </button>
+                          <button className="workspace-rename__button workspace-rename__button--primary" type="submit">
+                            Save
+                          </button>
+                        </div>
+                      </form>
+                    ) : null}
                     <div className="session-list">
                       {workspace.sessions.map((session) => {
                         const active = workspace.id === selectedWorkspace?.id && session.id === selectedSession?.id;
@@ -417,7 +643,7 @@ export default function App() {
 
                 {snapshot.lastError ? <div className="error-banner">{snapshot.lastError}</div> : null}
 
-                <div className="timeline-pane">
+                <div className="timeline-pane" ref={timelinePaneRef} onScroll={handleTimelineScroll}>
                   <div className="timeline" data-testid="transcript">
                     {selectedSession.transcript.length === 0 ? (
                       <div className="timeline-empty">Send a prompt to start the session.</div>
@@ -427,6 +653,11 @@ export default function App() {
                       ))
                     )}
                   </div>
+                  {showJumpToLatest ? (
+                    <button className="timeline-jump" type="button" onClick={jumpToLatest}>
+                      New activity below
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </section>
@@ -484,4 +715,9 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function isNearBottom(element: HTMLDivElement): boolean {
+  const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
+  return remaining < 32;
 }

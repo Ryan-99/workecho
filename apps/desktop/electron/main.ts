@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { DesktopAppStore } from "./app-store";
+import { NotificationManager } from "./notification-manager";
 import { desktopIpc } from "../src/ipc";
 import type { ComposerImageAttachment, CreateSessionInput, WorkspaceSessionTarget } from "../src/desktop-state";
 
@@ -11,6 +12,7 @@ const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 let store: DesktopAppStore;
 let mainWindow: BrowserWindow | null = null;
 let stopPublishingState: (() => void) | undefined;
+let stopNotifications: (() => void) | undefined;
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -70,6 +72,7 @@ app.whenReady().then(async () => {
     initialWorkspacePaths: resolveInitialWorkspacePaths(),
   });
   await store.initialize();
+  stopNotifications = new NotificationManager(store, () => mainWindow).start();
 
   ipcMain.handle(desktopIpc.ping, () => "pi desktop ready");
   ipcMain.handle(desktopIpc.openExternal, (_event, url: string) => {
@@ -92,6 +95,17 @@ app.whenReady().then(async () => {
     return store.addWorkspace(result.filePaths[0] as string);
   });
   ipcMain.handle(desktopIpc.selectWorkspace, (_event, workspaceId: string) => store.selectWorkspace(workspaceId));
+  ipcMain.handle(desktopIpc.renameWorkspace, (_event, workspaceId: string, displayName: string) =>
+    store.renameWorkspace(workspaceId, displayName),
+  );
+  ipcMain.handle(desktopIpc.removeWorkspace, (_event, workspaceId: string) => store.removeWorkspace(workspaceId));
+  ipcMain.handle(desktopIpc.openWorkspaceInFinder, async (_event, workspaceId: string) => {
+    const workspacePath = store.getWorkspacePath(workspaceId);
+    if (!workspacePath) {
+      throw new Error(`Unknown workspace: ${workspaceId}`);
+    }
+    await shell.openPath(workspacePath);
+  });
   ipcMain.handle(desktopIpc.syncCurrentWorkspace, () => store.syncCurrentWorkspace());
   ipcMain.handle(desktopIpc.selectSession, (_event, target: WorkspaceSessionTarget) =>
     store.selectSession(target),
@@ -140,9 +154,16 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  stopNotifications?.();
+  stopNotifications = undefined;
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  stopNotifications?.();
+  stopNotifications = undefined;
 });
 
 function resolveInitialWorkspacePaths(): readonly string[] {

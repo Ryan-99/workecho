@@ -1,21 +1,24 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { ComposerImageAttachment, TranscriptMessage } from "../src/desktop-state";
-
 export interface PersistedUiState {
+  readonly version?: 2;
   readonly selectedWorkspaceId?: string;
   readonly selectedSessionId?: string;
   readonly composerDraft?: string;
   readonly composerDraftsBySession?: Record<string, string>;
-  readonly composerAttachmentsBySession?: Record<string, readonly ComposerImageAttachment[]>;
-  readonly transcripts?: Record<string, readonly TranscriptMessage[]>;
 }
 
-export async function readPersistedUiState(uiStateFilePath: string): Promise<PersistedUiState> {
+export interface LegacyPersistedUiState extends PersistedUiState {
+  readonly composerAttachmentsBySession?: Record<string, readonly unknown[]>;
+  readonly transcripts?: Record<string, readonly unknown[]>;
+}
+
+export async function readPersistedUiState(uiStateFilePath: string): Promise<LegacyPersistedUiState> {
   try {
     const raw = await readFile(uiStateFilePath, "utf8");
-    const parsed = JSON.parse(raw) as PersistedUiState;
+    const parsed = JSON.parse(raw) as LegacyPersistedUiState;
     return {
+      version: parsed.version === 2 ? 2 : undefined,
       selectedWorkspaceId: parsed.selectedWorkspaceId,
       selectedSessionId: parsed.selectedSessionId,
       composerDraft: parsed.composerDraft ?? "",
@@ -33,5 +36,16 @@ export async function writePersistedUiState(
   payload: PersistedUiState,
 ): Promise<void> {
   await mkdir(dirname(uiStateFilePath), { recursive: true });
-  await writeFile(uiStateFilePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await writeFile(
+    uiStateFilePath,
+    `${JSON.stringify(
+      {
+        version: 2,
+        ...payload,
+      } satisfies PersistedUiState,
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
 }

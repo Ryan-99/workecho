@@ -198,6 +198,9 @@ declare module "@pi-app/session-driver" {
     cancelCurrentRun(sessionRef: SessionRef): Promise<void>;
     setSessionModel(sessionRef: SessionRef, selection: SessionModelSelection): Promise<void>;
     setSessionThinkingLevel(sessionRef: SessionRef, thinkingLevel: string): Promise<void>;
+    renameSession(sessionRef: SessionRef, title: string): Promise<void>;
+    compactSession(sessionRef: SessionRef, customInstructions?: string): Promise<void>;
+    reloadSession(sessionRef: SessionRef): Promise<void>;
     subscribe(sessionRef: SessionRef, listener: SessionEventListener): Unsubscribe;
     closeSession(sessionRef: SessionRef): Promise<void>;
   }

@@ -54,7 +54,7 @@ export interface SyncWorkspaceResult {
 
 interface ManagedSessionRecord {
   readonly ref: SessionRef;
-  readonly workspace: WorkspaceRef;
+  workspace: WorkspaceRef;
   title: string;
   session: AgentSession | undefined;
   sessionFile: string | undefined;
@@ -156,6 +156,41 @@ export class SessionSupervisor {
       workspace,
       sessions: (await this.catalogs.sessions.listSessions(workspace.workspaceId)).sessions,
     };
+  }
+
+  async renameWorkspace(workspaceId: WorkspaceId, displayName: string): Promise<void> {
+    const existing = await this.catalogs.workspaces.getWorkspace(workspaceId);
+    if (!existing) {
+      throw new Error(`Unknown workspace: ${workspaceId}`);
+    }
+
+    const nextWorkspace = createWorkspaceRef(existing.path, displayName.trim() || undefined);
+    await this.touchWorkspace(nextWorkspace);
+
+    for (const record of this.records.values()) {
+      if (record.workspace.workspaceId === workspaceId) {
+        record.workspace = nextWorkspace;
+      }
+    }
+  }
+
+  async removeWorkspace(workspaceId: WorkspaceId): Promise<void> {
+    const sessions = (await this.catalogs.sessions.listSessions(workspaceId)).sessions;
+    await this.catalogs.workspaces.deleteWorkspace(workspaceId);
+
+    for (const session of sessions) {
+      const key = sessionKey(session.sessionRef);
+      const record = this.records.get(key);
+      if (!record) {
+        continue;
+      }
+
+      record.unsubscribeAgent?.();
+      record.unsubscribeAgent = undefined;
+      record.listeners.clear();
+      record.session?.dispose();
+      this.records.delete(key);
+    }
   }
 
   async getTranscript(sessionRef: SessionRef): Promise<SessionTranscriptMessage[]> {
@@ -287,6 +322,51 @@ export class SessionSupervisor {
     forcePersistSession(sessionManager);
     record.config = deriveSessionConfig(sessionManager);
     record.updatedAt = nowIso();
+    await this.persistSnapshot(record);
+    await this.emit(record, sessionUpdatedEvent(record));
+  }
+
+  async renameSession(sessionRef: SessionRef, title: string): Promise<void> {
+    const record = await this.ensureRecord(sessionRef);
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      throw new Error("Session title cannot be empty.");
+    }
+
+    const sessionManager = this.getWritableSessionManager(record);
+    sessionManager.appendSessionInfo(nextTitle);
+    forcePersistSession(sessionManager);
+    record.title = nextTitle;
+    record.updatedAt = nowIso();
+    await this.persistSnapshot(record);
+    await this.emit(record, sessionUpdatedEvent(record));
+  }
+
+  async compactSession(sessionRef: SessionRef, customInstructions?: string): Promise<void> {
+    const record = await this.ensureRecord(sessionRef);
+    if (!record.session) {
+      throw new Error(`Session ${sessionKey(sessionRef)} is not active.`);
+    }
+
+    await record.session.compact(customInstructions);
+    record.runningRunId = undefined;
+    record.status = "idle";
+    record.updatedAt = nowIso();
+    record.config = deriveSessionConfig(record.session.sessionManager);
+    record.preview = extractPreview(record.session.messages) ?? record.preview;
+    await this.persistSnapshot(record);
+    await this.emit(record, sessionUpdatedEvent(record));
+  }
+
+  async reloadSession(sessionRef: SessionRef): Promise<void> {
+    const record = await this.ensureRecord(sessionRef);
+    if (!record.session) {
+      throw new Error(`Session ${sessionKey(sessionRef)} is not active.`);
+    }
+
+    await record.session.reload();
+    record.updatedAt = nowIso();
+    record.config = deriveSessionConfig(record.session.sessionManager);
     await this.persistSnapshot(record);
     await this.emit(record, sessionUpdatedEvent(record));
   }

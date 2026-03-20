@@ -21,6 +21,12 @@ contextBridge.exposeInMainWorld("piApp", {
   pickWorkspace: () => ipcRenderer.invoke(desktopIpc.pickWorkspace) as Promise<DesktopAppState>,
   selectWorkspace: (workspaceId: string) =>
     ipcRenderer.invoke(desktopIpc.selectWorkspace, workspaceId) as Promise<DesktopAppState>,
+  renameWorkspace: (workspaceId: string, displayName: string) =>
+    ipcRenderer.invoke(desktopIpc.renameWorkspace, workspaceId, displayName) as Promise<DesktopAppState>,
+  removeWorkspace: (workspaceId: string) =>
+    ipcRenderer.invoke(desktopIpc.removeWorkspace, workspaceId) as Promise<DesktopAppState>,
+  openWorkspaceInFinder: (workspaceId: string) =>
+    ipcRenderer.invoke(desktopIpc.openWorkspaceInFinder, workspaceId) as Promise<void>,
   syncCurrentWorkspace: () =>
     ipcRenderer.invoke(desktopIpc.syncCurrentWorkspace) as Promise<DesktopAppState>,
   selectSession: (target: WorkspaceSessionTarget) =>

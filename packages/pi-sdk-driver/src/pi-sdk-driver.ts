@@ -49,6 +49,18 @@ export class PiSdkDriver implements SessionDriver {
     return this.supervisor.setSessionThinkingLevel(sessionRef, thinkingLevel);
   }
 
+  renameSession(sessionRef: SessionRef, title: string): Promise<void> {
+    return this.supervisor.renameSession(sessionRef, title);
+  }
+
+  compactSession(sessionRef: SessionRef, customInstructions?: string): Promise<void> {
+    return this.supervisor.compactSession(sessionRef, customInstructions);
+  }
+
+  reloadSession(sessionRef: SessionRef): Promise<void> {
+    return this.supervisor.reloadSession(sessionRef);
+  }
+
   subscribe(sessionRef: SessionRef, listener: SessionEventListener): Unsubscribe {
     return this.supervisor.subscribe(sessionRef, listener);
   }
@@ -67,6 +79,14 @@ export class PiSdkDriver implements SessionDriver {
 
   syncWorkspace(path: string, displayName?: string): Promise<SyncWorkspaceResult> {
     return this.supervisor.syncWorkspace(path, displayName);
+  }
+
+  renameWorkspace(workspaceId: WorkspaceId, displayName: string) {
+    return this.supervisor.renameWorkspace(workspaceId, displayName);
+  }
+
+  removeWorkspace(workspaceId: WorkspaceId): Promise<void> {
+    return this.supervisor.removeWorkspace(workspaceId);
   }
 
   getTranscript(sessionRef: SessionRef) {

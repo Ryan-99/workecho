@@ -10,7 +10,11 @@ export interface ComposerSlashCommand {
 export type ParsedComposerCommand =
   | { type: "model"; provider: string; modelId: string }
   | { type: "thinking"; thinkingLevel: string }
-  | { type: "status" };
+  | { type: "status" }
+  | { type: "session" }
+  | { type: "reload" }
+  | { type: "compact"; customInstructions?: string }
+  | { type: "name"; title: string };
 
 export const SLASH_COMMANDS: readonly ComposerSlashCommand[] = [
   {
@@ -31,6 +35,30 @@ export const SLASH_COMMANDS: readonly ComposerSlashCommand[] = [
     title: "Status",
     description: "Show current session overrides in the timeline",
   },
+  {
+    command: "/session",
+    template: "/session",
+    title: "Session",
+    description: "Show current session details in the timeline",
+  },
+  {
+    command: "/name",
+    template: "/name New thread title",
+    title: "Rename",
+    description: "Rename the current session",
+  },
+  {
+    command: "/compact",
+    template: "/compact",
+    title: "Compact",
+    description: "Compact session context now",
+  },
+  {
+    command: "/reload",
+    template: "/reload",
+    title: "Reload",
+    description: "Reload prompts, skills, and session resources",
+  },
 ];
 
 export function formatSessionConfigStatus(config?: SessionConfig): string {
@@ -47,8 +75,21 @@ export function parseComposerCommand(value: string): ParsedComposerCommand | und
   if (trimmed === "/status") {
     return { type: "status" };
   }
+  if (trimmed === "/session") {
+    return { type: "session" };
+  }
+  if (trimmed === "/reload") {
+    return { type: "reload" };
+  }
 
   const [command, ...rest] = trimmed.split(/\s+/);
+  if (command === "/compact") {
+    return { type: "compact", customInstructions: rest.join(" ").trim() || undefined };
+  }
+  if (command === "/name") {
+    const title = rest.join(" ").trim();
+    return title ? { type: "name", title } : undefined;
+  }
   if (command === "/thinking") {
     const thinkingLevel = rest[0]?.trim();
     if (!thinkingLevel) {

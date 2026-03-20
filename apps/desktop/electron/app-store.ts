@@ -22,9 +22,12 @@ import {
 import { applySessionEventState } from "./app-store-session-state";
 import {
   readPersistedUiState,
+  type LegacyPersistedUiState,
   type PersistedUiState,
   writePersistedUiState,
 } from "./app-store-persistence";
+import { TranscriptCacheStore } from "./transcript-cache-store";
+import { AttachmentStore } from "./attachment-store";
 import {
   buildWorkspaceRecords,
   cloneComposerImageAttachment,
@@ -37,11 +40,11 @@ import {
   sessionKey,
   toSessionAttachments,
   toTranscriptAttachments,
-  TRANSCRIPT_HISTORY_LIMIT,
   toSessionRef,
 } from "./app-store-utils";
 
 type StateListener = (state: DesktopAppState) => void;
+type SessionEventListener = (event: SessionDriverEvent, state: DesktopAppState) => void | Promise<void>;
 
 interface RefreshStateOptions {
   readonly selectedWorkspaceId?: string;
@@ -55,11 +58,25 @@ export interface DesktopAppStoreOptions {
   readonly initialWorkspacePaths: readonly string[];
 }
 
+function fallbackSelectionAfterWorkspaceRemoval(state: DesktopAppState, removedWorkspaceId: string): RefreshStateOptions {
+  const remaining = state.workspaces.filter((workspace) => workspace.id !== removedWorkspaceId);
+  const nextWorkspace = remaining[0];
+  return {
+    selectedWorkspaceId: nextWorkspace?.id,
+    selectedSessionId: nextWorkspace?.sessions[0]?.id,
+    composerDraft: "",
+    clearLastError: true,
+  };
+}
+
 export class DesktopAppStore {
   private state = createEmptyDesktopAppState();
   private readonly listeners = new Set<StateListener>();
+  private readonly sessionEventListeners = new Set<SessionEventListener>();
   private readonly driver: PiSdkDriver;
   private readonly uiStateFilePath: string;
+  private readonly transcriptStore: TranscriptCacheStore;
+  private readonly attachmentStore: AttachmentStore;
   private readonly transcriptCache = new Map<string, TranscriptMessage[]>();
   private readonly composerDraftsBySession = new Map<string, string>();
   private readonly composerAttachmentsBySession = new Map<string, ComposerImageAttachment[]>();
@@ -72,7 +89,8 @@ export class DesktopAppStore {
   private readonly activeWorkingActivityBySession = new Map<string, string>();
   private readonly loadedTranscriptKeys = new Set<string>();
   private readonly initialWorkspacePaths: readonly string[];
-  private persistTimer: NodeJS.Timeout | undefined;
+  private persistUiStateTimer: NodeJS.Timeout | undefined;
+  private readonly transcriptPersistTimers = new Map<string, NodeJS.Timeout>();
   private initPromise: Promise<void> | undefined;
 
   constructor(options: DesktopAppStoreOptions) {
@@ -82,6 +100,8 @@ export class DesktopAppStore {
 
     this.driver = new PiSdkDriver(driverOptions);
     this.uiStateFilePath = join(options.userDataDir, "ui-state.json");
+    this.transcriptStore = new TranscriptCacheStore(options.userDataDir);
+    this.attachmentStore = new AttachmentStore(options.userDataDir);
     this.initialWorkspacePaths = options.initialWorkspacePaths;
   }
 
@@ -102,6 +122,13 @@ export class DesktopAppStore {
     void this.getState().then(listener).catch(() => undefined);
     return () => {
       this.listeners.delete(listener);
+    };
+  }
+
+  subscribeToSessionEvents(listener: SessionEventListener): () => void {
+    this.sessionEventListeners.add(listener);
+    return () => {
+      this.sessionEventListeners.delete(listener);
     };
   }
 
@@ -134,6 +161,40 @@ export class DesktopAppStore {
         composerDraft: "",
         clearLastError: true,
       });
+    } catch (error) {
+      return this.withError(error);
+    }
+  }
+
+  getWorkspacePath(workspaceId: string): string | undefined {
+    return this.state.workspaces.find((workspace) => workspace.id === workspaceId)?.path;
+  }
+
+  async renameWorkspace(workspaceId: string, displayName: string): Promise<DesktopAppState> {
+    await this.initialize();
+    const nextName = displayName.trim();
+    if (!nextName) {
+      return this.withError("Workspace name cannot be empty.");
+    }
+
+    try {
+      await this.driver.renameWorkspace(workspaceId, nextName);
+      return this.refreshState({
+        selectedWorkspaceId: this.state.selectedWorkspaceId,
+        selectedSessionId: this.state.selectedSessionId,
+        clearLastError: true,
+      });
+    } catch (error) {
+      return this.withError(error);
+    }
+  }
+
+  async removeWorkspace(workspaceId: string): Promise<DesktopAppState> {
+    await this.initialize();
+
+    try {
+      await this.driver.removeWorkspace(workspaceId);
+      return this.refreshState(fallbackSelectionAfterWorkspaceRemoval(this.state, workspaceId));
     } catch (error) {
       return this.withError(error);
     }
@@ -248,7 +309,7 @@ export class DesktopAppStore {
       composerAttachments: next,
       revision: this.state.revision + 1,
     };
-    await this.persistUiState();
+    await this.persistComposerAttachments(key, next);
     return this.emit();
   }
 
@@ -272,7 +333,7 @@ export class DesktopAppStore {
       composerAttachments: next,
       revision: this.state.revision + 1,
     };
-    await this.persistUiState();
+    await this.persistComposerAttachments(key, next);
     return this.emit();
   }
 
@@ -304,10 +365,12 @@ export class DesktopAppStore {
       text,
       toTranscriptAttachments(attachments),
     );
+    this.persistTranscriptCacheForSession(sessionRef);
     clearActiveAssistantMessage(this.activeAssistantMessageBySession, sessionRef);
     this.sessionErrorsBySession.delete(key);
     this.composerDraftsBySession.delete(key);
     this.composerAttachmentsBySession.delete(key);
+    await this.persistComposerAttachments(key, []);
 
     try {
       await this.driver.sendUserMessage(sessionRef, {
@@ -319,11 +382,13 @@ export class DesktopAppStore {
       });
     } catch (error) {
       this.transcriptCache.set(key, transcript.slice(0, -1));
+      this.persistTranscriptCacheForSession(sessionRef);
       if (textInput) {
         this.composerDraftsBySession.set(key, textInput);
       }
       if (attachments.length > 0) {
         this.composerAttachmentsBySession.set(key, cloneComposerImageAttachments(attachments));
+        await this.persistComposerAttachments(key, attachments);
       }
       return this.withError(error);
     }
@@ -355,24 +420,11 @@ export class DesktopAppStore {
   private async initializeInternal(): Promise<void> {
     try {
       const persisted = await this.readUiState();
-      this.transcriptCache.clear();
-      for (const [key, transcript] of Object.entries(persisted.transcripts ?? {})) {
-        const clonedTranscript = transcript.map(cloneTranscriptMessage);
-        this.transcriptCache.set(key, clonedTranscript);
-        if (clonedTranscript.length > 0) {
-          this.loadedTranscriptKeys.add(key);
-        }
-      }
+    await this.migrateLegacyPersistence(persisted);
       this.composerDraftsBySession.clear();
       for (const [key, draft] of Object.entries(persisted.composerDraftsBySession ?? {})) {
         if (draft) {
           this.composerDraftsBySession.set(key, draft);
-        }
-      }
-      this.composerAttachmentsBySession.clear();
-      for (const [key, attachments] of Object.entries(persisted.composerAttachmentsBySession ?? {})) {
-        if (attachments.length > 0) {
-          this.composerAttachmentsBySession.set(key, cloneComposerImageAttachments(attachments));
         }
       }
       const initialWorkspacePaths = this.initialWorkspacePaths.map((path) => path.trim()).filter(Boolean);
@@ -410,6 +462,31 @@ export class DesktopAppStore {
     }
   }
 
+  private async migrateLegacyPersistence(persisted: LegacyPersistedUiState): Promise<void> {
+    const transcriptEntries = Object.entries(persisted.transcripts ?? {});
+    await Promise.all(
+      transcriptEntries.map(async ([key, transcript]) => {
+        const clonedTranscript = transcript.map((item) => cloneTranscriptMessage(item as TranscriptMessage));
+        this.transcriptCache.set(key, clonedTranscript);
+        if (clonedTranscript.length > 0) {
+          this.loadedTranscriptKeys.add(key);
+          await this.transcriptStore.write(key, clonedTranscript);
+        }
+      }),
+    );
+
+    const attachmentEntries = Object.entries(persisted.composerAttachmentsBySession ?? {});
+    await Promise.all(
+      attachmentEntries.map(async ([key, attachments]) => {
+        const cloned = cloneComposerImageAttachments(attachments as readonly ComposerImageAttachment[]);
+        if (cloned.length > 0) {
+          this.composerAttachmentsBySession.set(key, cloned);
+          await this.attachmentStore.write(key, cloned);
+        }
+      }),
+    );
+  }
+
   private async refreshState(options: RefreshStateOptions = {}): Promise<DesktopAppState> {
     const [workspacesSnapshot, sessionsSnapshot] = await Promise.all([
       this.driver.listWorkspaces(),
@@ -437,10 +514,12 @@ export class DesktopAppStore {
     );
 
     if (selectedWorkspaceId && selectedSessionId) {
-      await this.ensureSessionReady({
+      const sessionRef = {
         workspaceId: selectedWorkspaceId,
         sessionId: selectedSessionId,
-      });
+      };
+      await this.ensureSessionReady(sessionRef);
+      await this.ensureComposerAttachmentsLoaded(sessionRef);
       workspaces = buildWorkspaceRecords(
         workspacesSnapshot.workspaces,
         sessionsSnapshot.sessions,
@@ -536,9 +615,30 @@ export class DesktopAppStore {
       return;
     }
 
+    const cachedTranscript = await this.transcriptStore.read(key);
+    const transcript = cachedTranscript ?? (await this.driver.getTranscript(sessionRef));
+    this.loadedTranscriptKeys.add(key);
+    this.transcriptCache.set(key, transcript.map(cloneTranscriptMessage));
+  }
+
+  private async reloadTranscriptFromDriver(sessionRef: SessionRef): Promise<void> {
+    const key = sessionKey(sessionRef);
     const transcript = await this.driver.getTranscript(sessionRef);
     this.loadedTranscriptKeys.add(key);
     this.transcriptCache.set(key, transcript.map(cloneTranscriptMessage));
+    this.persistTranscriptCacheForSession(sessionRef);
+  }
+
+  private async ensureComposerAttachmentsLoaded(sessionRef: SessionRef): Promise<void> {
+    const key = sessionKey(sessionRef);
+    if (this.composerAttachmentsBySession.has(key)) {
+      return;
+    }
+
+    const attachments = await this.attachmentStore.read(key);
+    if (attachments?.length) {
+      this.composerAttachmentsBySession.set(key, cloneComposerImageAttachments(attachments));
+    }
   }
 
   private async ensureSessionSubscribed(sessionRef: SessionRef): Promise<void> {
@@ -603,12 +703,14 @@ export class DesktopAppStore {
       ...this.state,
       lastError: this.resolveSelectedSessionError(this.state.selectedWorkspaceId, this.state.selectedSessionId, false),
     };
+    this.persistTranscriptCacheForSession(event.sessionRef);
     if (event.type === "runCompleted" || event.type === "runFailed" || event.type === "sessionClosed") {
       await this.persistUiState();
     } else {
       this.schedulePersistUiState();
     }
-    this.emit();
+    const snapshot = this.emit();
+    await this.emitSessionEvent(event, snapshot);
   }
 
   private workspaceRefFromState(workspaceId: string): WorkspaceRef | undefined {
@@ -635,41 +737,56 @@ export class DesktopAppStore {
     });
   }
 
-  private async readUiState(): Promise<PersistedUiState> {
+  private async readUiState(): Promise<LegacyPersistedUiState> {
     return readPersistedUiState(this.uiStateFilePath);
   }
 
   private async persistUiState(): Promise<void> {
-    if (this.persistTimer) {
-      clearTimeout(this.persistTimer);
-      this.persistTimer = undefined;
+    if (this.persistUiStateTimer) {
+      clearTimeout(this.persistUiStateTimer);
+      this.persistUiStateTimer = undefined;
     }
     const payload: PersistedUiState = {
       selectedWorkspaceId: this.state.selectedWorkspaceId || undefined,
       selectedSessionId: this.state.selectedSessionId || undefined,
       composerDraft: this.state.composerDraft || undefined,
       composerDraftsBySession: Object.fromEntries(this.composerDraftsBySession.entries()),
-      composerAttachmentsBySession: Object.fromEntries(
-        [...this.composerAttachmentsBySession.entries()].map(([key, attachments]) => [
-          key,
-          cloneComposerImageAttachments(attachments),
-        ]),
-      ),
-      transcripts: Object.fromEntries(
-        [...this.transcriptCache.entries()].map(([key, transcript]) => [key, transcript.slice(-TRANSCRIPT_HISTORY_LIMIT)]),
-      ),
     };
 
     await writePersistedUiState(this.uiStateFilePath, payload);
   }
 
-  private schedulePersistUiState(): void {
-    if (this.persistTimer) {
-      clearTimeout(this.persistTimer);
+  private async persistComposerAttachments(
+    key: string,
+    attachments: readonly ComposerImageAttachment[],
+  ): Promise<void> {
+    await this.attachmentStore.write(key, cloneComposerImageAttachments(attachments));
+    await this.persistUiState();
+  }
+
+  private persistTranscriptCacheForSession(sessionRef: SessionRef): void {
+    const key = sessionKey(sessionRef);
+    const existing = this.transcriptPersistTimers.get(key);
+    if (existing) {
+      clearTimeout(existing);
     }
 
-    this.persistTimer = setTimeout(() => {
-      this.persistTimer = undefined;
+    const timer = setTimeout(() => {
+      this.transcriptPersistTimers.delete(key);
+      const transcript = (this.transcriptCache.get(key) ?? []).map(cloneTranscriptMessage);
+      void this.transcriptStore.write(key, transcript);
+    }, 250);
+
+    this.transcriptPersistTimers.set(key, timer);
+  }
+
+  private schedulePersistUiState(): void {
+    if (this.persistUiStateTimer) {
+      clearTimeout(this.persistUiStateTimer);
+    }
+
+    this.persistUiStateTimer = setTimeout(() => {
+      this.persistUiStateTimer = undefined;
       void this.persistUiState();
     }, 250);
   }
@@ -680,6 +797,12 @@ export class DesktopAppStore {
       listener(snapshot);
     }
     return snapshot;
+  }
+
+  private async emitSessionEvent(event: SessionDriverEvent, snapshot: DesktopAppState): Promise<void> {
+    for (const listener of this.sessionEventListeners) {
+      await listener(event, snapshot);
+    }
   }
 
   private async withError(error: unknown): Promise<DesktopAppState> {
@@ -777,6 +900,34 @@ export class DesktopAppStore {
       return this.finishComposerCommand(sessionRef, key, formatSessionConfigStatus(this.sessionConfigBySession.get(key)));
     }
 
+    if (parsed.type === "session") {
+      const workspace = this.state.workspaces.find((entry) => entry.id === sessionRef.workspaceId);
+      const session = workspace?.sessions.find((entry) => entry.id === sessionRef.sessionId);
+      const parts = [
+        `Session ${session?.title ?? sessionRef.sessionId}`,
+        `ID ${sessionRef.sessionId}`,
+        workspace ? `Workspace ${workspace.name}` : undefined,
+        session ? `Status ${session.status}` : undefined,
+      ].filter(Boolean);
+      return this.finishComposerCommand(sessionRef, key, parts.join(" · "));
+    }
+
+    if (parsed.type === "name") {
+      await this.driver.renameSession(sessionRef, parsed.title);
+      return this.finishComposerCommand(sessionRef, key, `Session renamed to ${parsed.title}`);
+    }
+
+    if (parsed.type === "compact") {
+      await this.driver.compactSession(sessionRef, parsed.customInstructions);
+      await this.reloadTranscriptFromDriver(sessionRef);
+      return this.finishComposerCommand(sessionRef, key, "Compacted session context");
+    }
+
+    if (parsed.type === "reload") {
+      await this.driver.reloadSession(sessionRef);
+      return this.finishComposerCommand(sessionRef, key, "Reloaded session resources");
+    }
+
     return this.withError(`Unsupported slash command: ${commandText}`);
   }
 
@@ -785,6 +936,7 @@ export class DesktopAppStore {
     const transcript = [...(this.transcriptCache.get(key) ?? [])];
     transcript.push(makeActivityItem(label));
     this.transcriptCache.set(key, transcript);
+    this.persistTranscriptCacheForSession(sessionRef);
   }
 
   private finishComposerCommand(sessionRef: SessionRef, key: string, label: string): DesktopAppState {

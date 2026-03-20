@@ -133,12 +133,31 @@
   width: 100%;
   min-height: 420px;
   background: transparent;
+  position: relative;
+  max-height: calc(100vh - 320px);
+  overflow: auto;
+  scroll-behavior: smooth;
 }
 
 .timeline-empty {
   color: var(--muted);
   font-size: 14px;
   padding: 8px 0 12px;
+}
+
+.timeline-jump {
+  position: sticky;
+  bottom: 12px;
+  margin: 18px auto 0;
+  display: block;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid #d7dce8;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 14px 32px rgba(20, 27, 45, 0.12);
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .error-banner {

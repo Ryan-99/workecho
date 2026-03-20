@@ -19,7 +19,10 @@
     "demo:readme": "pnpm run build && node --experimental-strip-types scripts/readme-demo.mts",
     "start": "pnpm run build:deps && electron .",
     "test:live:parallel": "pnpm exec playwright test tests/parallel-live.spec.ts",
-    "test:live:controls": "pnpm build && pnpm exec playwright test tests/controls-live.spec.ts"
+    "test:live:controls": "pnpm build && pnpm exec playwright test tests/controls-live.spec.ts",
+    "test:live:persistence": "pnpm build && pnpm exec playwright test tests/persistence-live.spec.ts",
+    "test:live:workspace-menu": "pnpm build && pnpm exec playwright test tests/workspace-menu-live.spec.ts",
+    "test:live:notifications": "pnpm build && pnpm exec playwright test tests/notifications-live.spec.ts"
   },
   "dependencies": {
     "@pi-app/pi-sdk-driver": "workspace:*",
