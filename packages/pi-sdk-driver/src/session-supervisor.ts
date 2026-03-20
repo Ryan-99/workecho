@@ -126,6 +126,7 @@ export class SessionSupervisor {
         }),
       )
     ).filter((session): session is (typeof existingSessions)[number] => Boolean(session));
+    const preservedKeys = new Set(preservedEntries.map((entry) => sessionKey(entry.sessionRef)));
     const mergedEntries = [...nextEntries, ...preservedEntries];
     const nextSessionFiles = Object.fromEntries([
       ...nextEntries.map((entry, index) => [sessionKey(entry.sessionRef), infos[index]?.path ?? ""]),
@@ -135,7 +136,7 @@ export class SessionSupervisor {
     await this.catalogs.replaceWorkspaceSessions(workspace.workspaceId, mergedEntries, nextSessionFiles);
     for (const session of existingSessions) {
       const key = sessionKey(session.sessionRef);
-      if (discoveredKeys.has(key) || preservedEntries.some((entry) => sessionKey(entry.sessionRef) === key)) {
+      if (discoveredKeys.has(key) || preservedKeys.has(key)) {
         continue;
       }
 

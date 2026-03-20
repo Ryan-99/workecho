@@ -14,6 +14,14 @@ let mainWindow: BrowserWindow | null = null;
 let stopPublishingState: (() => void) | undefined;
 let stopNotifications: (() => void) | undefined;
 
+const SUPPORTED_IMAGE_TYPES = [
+  { extension: "png", mimeType: "image/png" },
+  { extension: "jpg", mimeType: "image/jpeg" },
+  { extension: "jpeg", mimeType: "image/jpeg" },
+  { extension: "gif", mimeType: "image/gif" },
+  { extension: "webp", mimeType: "image/webp" },
+] as const;
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1480,
@@ -120,7 +128,7 @@ app.whenReady().then(async () => {
       filters: [
         {
           name: "Images",
-          extensions: ["png", "jpg", "jpeg", "gif", "webp"],
+          extensions: SUPPORTED_IMAGE_TYPES.map((type) => type.extension),
         },
       ],
       title: "Attach images",
@@ -189,10 +197,10 @@ async function readComposerImage(filePath: string): Promise<ComposerImageAttachm
 }
 
 function mimeTypeForPath(filePath: string): string {
-  const extension = path.extname(filePath).toLowerCase();
-  if (extension === ".png") return "image/png";
-  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
-  if (extension === ".gif") return "image/gif";
-  if (extension === ".webp") return "image/webp";
+  const extension = path.extname(filePath).slice(1).toLowerCase();
+  const supported = SUPPORTED_IMAGE_TYPES.find((type) => type.extension === extension);
+  if (supported) {
+    return supported.mimeType;
+  }
   return "application/octet-stream";
 }

@@ -207,34 +207,17 @@ export class DesktopAppStore {
       return this.emit();
     }
 
-    const syncedState = await this.syncWorkspace(workspaceId, {
+    return this.syncWorkspace(workspaceId, {
       selectedWorkspaceId: workspaceId,
-      selectedSessionId: this.state.selectedSessionId,
-      clearLastError: true,
-    });
-    const syncedWorkspace = syncedState.workspaces.find((entry) => entry.id === workspaceId);
-
-    const firstSession = syncedWorkspace?.sessions[0];
-    if (firstSession) {
-      await this.ensureSessionReady({
-        workspaceId,
-        sessionId: firstSession.id,
-      });
-    }
-
-    return this.refreshState({
-      selectedWorkspaceId: workspaceId,
-      selectedSessionId: firstSession?.id ?? "",
+      selectedSessionId: this.state.selectedWorkspaceId === workspaceId ? this.state.selectedSessionId : "",
       clearLastError: true,
     });
   }
 
   async selectSession(target: WorkspaceSessionTarget): Promise<DesktopAppState> {
     await this.initialize();
-    const sessionRef = toSessionRef(target);
 
     try {
-      await this.ensureSessionReady(sessionRef);
       return this.refreshState({
         selectedWorkspaceId: target.workspaceId,
         selectedSessionId: target.sessionId,
