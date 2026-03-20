@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { Page } from "@playwright/test";
-import { addWorkspace, createSession, launchDesktop, makeWorkspace } from "../tests/harness.ts";
+import { addWorkspace, createSession, getDesktopState, launchDesktop, makeWorkspace } from "../tests/harness.ts";
 
 const execFileAsync = promisify(execFile);
 const frameRate = 10;
@@ -16,8 +16,7 @@ const outputDir = path.join(repoRoot, "docs", "readme");
 async function main(): Promise<void> {
   const userDataDir = await mkdtemp(path.join(tmpdir(), "pi-app-demo-user-data-"));
   const framesDir = await mkdtemp(path.join(tmpdir(), "pi-app-demo-frames-"));
-  const alphaPath = await makeWorkspace("acme-web");
-  const betaPath = await makeWorkspace("ops-console");
+  const workspacePath = await makeWorkspace("acme-web");
 
   await mkdir(outputDir, { recursive: true });
 
@@ -29,31 +28,30 @@ async function main(): Promise<void> {
     stopRecording = startFrameRecorder(page, framesDir);
 
     await hold(700);
-    await addWorkspace(page, alphaPath);
+    await addWorkspace(page, workspacePath);
     await hold(700);
 
-    await createSession(page, alphaPath, "Release checklist");
+    await createSession(page, workspacePath, "README demo");
     await hold(500);
+
+    const prompt = [
+      "Use your read tool to inspect README.md in this workspace.",
+      "Then reply in exactly two short bullet points:",
+      "- project name",
+      "- one suggested next step",
+    ].join(" ");
 
     const composer = page.getByTestId("composer");
     await composer.click();
-    await composer.pressSequentially("Polish README, ship demo asset, and verify desktop smoke tests.", { delay: 45 });
-    await hold(900);
+    await composer.pressSequentially(prompt, { delay: 28 });
+    await hold(600);
+    await page.getByTestId("send").click();
 
-    await addWorkspace(page, betaPath);
-    await hold(700);
-
-    await createSession(page, betaPath, "Bug triage");
-    await hold(500);
-
-    await page.locator(".workspace-row", { hasText: "acme-web" }).click();
-    await hold(500);
-
-    await page.getByRole("button", { name: /Release checklist/i }).click();
-    await hold(500);
-
-    await page.getByRole("button", { name: /Bug triage/i }).click();
-    await hold(800);
+    await waitForLiveResponse(page, {
+      timeoutMs: 90_000,
+      minimumAssistantLength: 30,
+    });
+    await hold(1200);
 
     await page.screenshot({ path: path.join(outputDir, "demo-poster.png") });
 
@@ -104,6 +102,41 @@ function startFrameRecorder(page: Page, framesDir: string): () => Promise<number
     const frames = await readdir(framesDir);
     return frames.length;
   };
+}
+
+async function waitForLiveResponse(
+  page: Page,
+  options: {
+    timeoutMs: number;
+    minimumAssistantLength: number;
+  },
+): Promise<void> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < options.timeoutMs) {
+    const state = await getDesktopState(page);
+    const workspace = state.workspaces.find((entry) => entry.id === state.selectedWorkspaceId);
+    const session = workspace?.sessions.find((entry) => entry.id === state.selectedSessionId);
+    const transcript = session?.transcript ?? [];
+    const assistantMessages = transcript.filter((item) => item.kind === "message" && item.role === "assistant");
+    const latestAssistant = assistantMessages.at(-1);
+
+    if (state.lastError) {
+      throw new Error(`Live demo failed: ${state.lastError}`);
+    }
+
+    if (
+      session?.status === "idle" &&
+      latestAssistant &&
+      latestAssistant.text.trim().length >= options.minimumAssistantLength
+    ) {
+      return;
+    }
+
+    await hold(250);
+  }
+
+  throw new Error(`Timed out waiting for live response after ${options.timeoutMs}ms`);
 }
 
 async function renderMp4(framesDir: string, outputPath: string): Promise<void> {
