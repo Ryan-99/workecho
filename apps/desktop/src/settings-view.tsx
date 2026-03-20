@@ -18,8 +18,6 @@ interface SettingsViewProps {
 }
 
 const THINKING_LEVELS: NonNullable<RuntimeSettingsSnapshot["defaultThinkingLevel"]>[] = [
-  "off",
-  "minimal",
   "low",
   "medium",
   "high",
