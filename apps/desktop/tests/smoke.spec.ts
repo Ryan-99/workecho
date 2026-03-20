@@ -20,8 +20,8 @@ test("boots the Codex-style shell with an empty workspace catalog", async () => 
 
   try {
     const window = await harness.firstWindow();
-    await expect(window.getByText("pi desktop")).toBeVisible();
-    await expect(window.getByText("workspace-driven sessions")).toBeVisible();
+    await expect(window.getByRole("button", { name: "New thread" })).toBeVisible();
+    await expect(window.getByRole("button", { name: "Threads" })).toBeVisible();
     await expect(window.getByTestId("empty-state")).toBeVisible();
 
     const state = await getDesktopState(window);
@@ -36,7 +36,7 @@ test("boots the Codex-style shell with an empty workspace catalog", async () => 
 test("persists workspace, session selection, and draft across app restart", async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), "pi-app-user-data-"));
   const workspacePath = await makeWorkspace("codex-style-folder");
-  const sessionTitle = "Investigate repo";
+  const sessionTitle = "New thread";
   const draft = "Read the README and report the project title.";
 
   const firstRun = await launchDesktop(userDataDir);
@@ -45,12 +45,13 @@ test("persists workspace, session selection, and draft across app restart", asyn
     await addWorkspace(window, workspacePath);
     await expect(window.getByTestId("workspace-list")).toContainText(basename(workspacePath));
 
-    await createSession(window, workspacePath, sessionTitle);
+    await window.locator(".sidebar__new").click();
     await expect(window.locator(".topbar__session")).toHaveText(sessionTitle);
 
     const composer = window.getByTestId("composer");
     await composer.fill(draft);
     await expect(composer).toHaveValue(draft);
+    await expect.poll(async () => (await getDesktopState(window)).composerDraft).toBe(draft);
   } finally {
     await firstRun.close();
   }
@@ -91,6 +92,9 @@ test("navigates across folders and sessions through the sidebar", async () => {
 
     await expect(window.getByTestId("workspace-list")).toContainText(basename(alphaPath));
     await expect(window.getByTestId("workspace-list")).toContainText(basename(betaPath));
+
+    await window.locator(".workspace-row", { hasText: "alpha-workspace" }).click();
+    await expect(window.locator(".topbar__workspace")).toHaveText("alpha-workspace");
 
     await window.getByRole("button", { name: /Alpha session one/i }).click();
     await expect(window.locator(".topbar__session")).toHaveText("Alpha session one");

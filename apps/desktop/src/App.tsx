@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import {
   getSelectedSession,
   getSelectedWorkspace,
@@ -69,83 +69,179 @@ function updateSnapshot(
   api: NonNullable<typeof window.piApp>,
   setSnapshot: Dispatch<SetStateAction<DesktopAppState | null>>,
   action: () => Promise<DesktopAppState>,
-): Promise<void> {
+) {
   return action().then((state) => {
     setSnapshot(state);
+    return state;
   });
+}
+
+function Icon({ children }: { readonly children: ReactNode }) {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 20 20">
+      {children}
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <Icon>
+      <path d="M10 4.25v11.5M4.25 10h11.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </Icon>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <Icon>
+      <path
+        d="M2.75 6.5a1.75 1.75 0 0 1 1.75-1.75h3.1l1.5 1.7h6.4a1.75 1.75 0 0 1 1.75 1.75v5.3a1.75 1.75 0 0 1-1.75 1.75H4.5a1.75 1.75 0 0 1-1.75-1.75V6.5Z"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </Icon>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <Icon>
+      <path
+        d="M15.75 7.25A5.75 5.75 0 1 0 17 10.89M15.75 4.75v2.5h-2.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+      />
+    </Icon>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <Icon>
+      <circle cx="10" cy="10" r="6.75" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10 6.8v3.55l2.3 1.35" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+    </Icon>
+  );
+}
+
+function SparkIcon() {
+  return (
+    <Icon>
+      <path
+        d="m10 3.1 1.55 3.66 3.66 1.55-3.66 1.55L10 13.5l-1.55-3.64L4.8 8.3l3.65-1.55L10 3.1Zm5 8.6.72 1.58 1.58.72-1.58.72L15 16.3l-.72-1.58-1.58-.72 1.58-.72.72-1.58Z"
+        fill="currentColor"
+      />
+    </Icon>
+  );
+}
+
+function SlidersIcon() {
+  return (
+    <Icon>
+      <path
+        d="M4 5.75h12M4 10h12M4 14.25h12M7 4v3.5M12.5 8.25v3.5M9 12.5V16"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.55"
+      />
+    </Icon>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <Icon>
+      <path
+        d="M8.8 3.6h2.4l.4 1.6 1.5.62 1.42-.85 1.7 1.7-.86 1.43.63 1.5 1.6.4v2.4l-1.6.4-.63 1.5.86 1.43-1.7 1.7-1.42-.85-1.5.62-.4 1.6H8.8l-.4-1.6-1.5-.62-1.42.85-1.7-1.7.86-1.43-.63-1.5-1.6-.4v-2.4l1.6-.4.63-1.5-.86-1.43 1.7-1.7 1.42.85 1.5-.62.4-1.6Z"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.25"
+      />
+      <circle cx="10" cy="10" r="2.3" stroke="currentColor" strokeWidth="1.25" />
+    </Icon>
+  );
 }
 
 export default function App() {
   const [snapshot, setSnapshot] = useDesktopAppState();
+  const [composerDraft, setComposerDraft] = useState("");
   const api = window.piApp;
+
+  const selectedWorkspace = snapshot ? (getSelectedWorkspace(snapshot) ?? snapshot.workspaces[0]) : undefined;
+  const selectedSession = snapshot ? (getSelectedSession(snapshot) ?? selectedWorkspace?.sessions[0]) : undefined;
+  const selectedSessionKey = `${selectedWorkspace?.id ?? ""}:${selectedSession?.id ?? ""}`;
+
+  useEffect(() => {
+    if (!snapshot) {
+      return;
+    }
+    setComposerDraft(snapshot.composerDraft);
+  }, [selectedSessionKey, snapshot]);
+
+  useEffect(() => {
+    if (!api || !snapshot || composerDraft === snapshot.composerDraft) {
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void updateSnapshot(api, setSnapshot, () => api.updateComposerDraft(composerDraft));
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [api, composerDraft, setSnapshot, snapshot]);
 
   if (!api || !snapshot) {
     return (
       <div className="shell shell--loading">
         <main className="loading-card">
-          <div className="loading-card__eyebrow">pi desktop</div>
-          <h1>Loading workspace catalog</h1>
-          <p>
-            The desktop shell is restoring folder and session state from the main process before the Codex-style UI
-            becomes interactive.
-          </p>
+          <div className="loading-card__eyebrow">pi-app</div>
+          <h1>Loading sessions</h1>
+          <p>The desktop shell is restoring folder and thread state from the main process.</p>
         </main>
       </div>
     );
   }
 
-  const selectedWorkspace = getSelectedWorkspace(snapshot) ?? snapshot.workspaces[0];
-  const selectedSession = getSelectedSession(snapshot) ?? selectedWorkspace?.sessions[0];
-
   return (
     <div className="shell">
       <aside className="sidebar">
         <div className="sidebar__top">
-          <div className="brand">
-            <div className="brand__mark">pi</div>
-            <div>
-              <div className="brand__name">pi desktop</div>
-              <div className="brand__sub">workspace-driven sessions</div>
-            </div>
-          </div>
+          <button
+            className="sidebar__new"
+            type="button"
+            disabled={!selectedWorkspace}
+            onClick={() => {
+              if (!selectedWorkspace) {
+                return;
+              }
+              void updateSnapshot(api, setSnapshot, () =>
+                api.createSession({ workspaceId: selectedWorkspace.id, title: "New thread" }),
+              );
+            }}
+          >
+            <PlusIcon />
+            <span>New thread</span>
+          </button>
 
-          <div className="sidebar__actions">
-            <button
-              className="sidebar__new"
-              type="button"
-              disabled={!selectedWorkspace}
-              onClick={() => {
-                if (!selectedWorkspace) {
-                  return;
-                }
-                void updateSnapshot(api, setSnapshot, () =>
-                  api.createSession({ workspaceId: selectedWorkspace.id, title: "New thread" }),
-                );
-              }}
-            >
-              New thread
+          <nav className="rail" aria-label="Primary">
+            <button className="rail__item rail__item--active" disabled type="button">
+              <FolderIcon />
+              <span>Threads</span>
             </button>
-            <button
-              className="sidebar__secondary"
-              type="button"
-              onClick={() => {
-                void updateSnapshot(api, setSnapshot, () => api.pickWorkspace());
-              }}
-            >
-              Open folder
+            <button className="rail__item" disabled type="button">
+              <ClockIcon />
+              <span>Automations</span>
             </button>
-          </div>
-
-          <nav className="rail">
-            <a className="rail__item rail__item--active" href="#threads">
-              Threads
-            </a>
-            <a className="rail__item" href="#automations">
-              Automations
-            </a>
-            <a className="rail__item" href="#skills">
-              Skills
-            </a>
+            <button className="rail__item" disabled type="button">
+              <SparkIcon />
+              <span>Skills</span>
+            </button>
           </nav>
         </div>
 
@@ -154,14 +250,25 @@ export default function App() {
             <span>Threads</span>
             <div className="section__tools">
               <button
-                aria-label="Open workspace"
+                aria-label="Open folder"
                 className="icon-button"
                 type="button"
                 onClick={() => {
                   void updateSnapshot(api, setSnapshot, () => api.pickWorkspace());
                 }}
               >
-                +
+                <FolderIcon />
+              </button>
+              <button
+                aria-label="Sync workspace"
+                className="icon-button"
+                disabled={!selectedWorkspace}
+                type="button"
+                onClick={() => {
+                  void updateSnapshot(api, setSnapshot, () => api.syncCurrentWorkspace());
+                }}
+              >
+                <SlidersIcon />
               </button>
             </div>
           </div>
@@ -169,9 +276,9 @@ export default function App() {
           {snapshot.workspaces.length === 0 ? (
             <div className="empty-state" data-testid="empty-state">
               <h2>No folders yet</h2>
-              <p>Open a project folder to start building a Codex-style workspace and session list.</p>
+              <p>Open a project folder to start building a workspace and session list.</p>
               <button
-                className="chip"
+                className="button button--primary"
                 type="button"
                 onClick={() => {
                   void updateSnapshot(api, setSnapshot, () => api.pickWorkspace());
@@ -185,21 +292,21 @@ export default function App() {
               {snapshot.workspaces.map((workspace: WorkspaceRecord) => {
                 const workspaceActive = workspace.id === selectedWorkspace?.id;
                 return (
-                  <div key={workspace.id} className="workspace-card">
+                  <section key={workspace.id} className="workspace-group">
                     <button
-                      className={`workspace-card__header ${workspaceActive ? "workspace-card__header--active" : ""}`}
+                      className={`workspace-row ${workspaceActive ? "workspace-row--active" : ""}`}
                       onClick={() => {
                         void updateSnapshot(api, setSnapshot, () => api.selectWorkspace(workspace.id));
                       }}
                       type="button"
                     >
-                      <span className="workspace-card__folder" aria-hidden="true">
-                        ⌂
+                      <span className="workspace-row__icon" aria-hidden="true">
+                        <FolderIcon />
                       </span>
-                      <span className="workspace-card__name">{workspace.name}</span>
-                      <span className="workspace-card__time">{formatRelativeTime(workspace.lastOpenedAt)}</span>
+                      <span className="workspace-row__name">{workspace.name}</span>
+                      <span className="workspace-row__time">{formatRelativeTime(workspace.lastOpenedAt)}</span>
                     </button>
-                    <div className="workspace-card__path">{workspace.path}</div>
+                    <div className="workspace-row__path">{workspace.path}</div>
 
                     <div className="session-list">
                       {workspace.sessions.map((session) => {
@@ -225,7 +332,7 @@ export default function App() {
                         );
                       })}
                     </div>
-                  </div>
+                  </section>
                 );
               })}
             </div>
@@ -234,7 +341,9 @@ export default function App() {
 
         <div className="sidebar__footer">
           <div className="sidebar__settings">
-            <span className="sidebar__settings-mark">⚙</span>
+            <span className="sidebar__settings-mark">
+              <SettingsIcon />
+            </span>
             <span>Settings</span>
           </div>
         </div>
@@ -256,22 +365,25 @@ export default function App() {
 
           <div className="topbar__actions">
             <button
-              className="chip chip--ghost"
+              className="button button--ghost"
+              disabled={!selectedWorkspace}
               type="button"
               onClick={() => {
                 void updateSnapshot(api, setSnapshot, () => api.syncCurrentWorkspace());
               }}
             >
-              Sync
+              <RefreshIcon />
+              <span>Sync</span>
             </button>
             <button
-              className="chip"
+              className="button button--ghost"
               type="button"
               onClick={() => {
                 void updateSnapshot(api, setSnapshot, () => api.pickWorkspace());
               }}
             >
-              Add folder
+              <FolderIcon />
+              <span>Add folder</span>
             </button>
           </div>
         </header>
@@ -279,14 +391,17 @@ export default function App() {
         {selectedWorkspace && selectedSession ? (
           <>
             <section className="canvas">
-              <div className="canvas__hero">
-                <div className="hero__eyebrow">Session</div>
-                <h1>{selectedSession.title}</h1>
-                <p>{selectedSession.preview}</p>
-                <div className="hero__badges">
-                  <span className="badge badge--soft">Local</span>
-                  <span className={`badge badge--${selectedSession.status}`}>{statusLabel(selectedSession.status)}</span>
-                  <span className="badge badge--soft">{selectedWorkspace.path}</span>
+              <div className="session-header">
+                <div className="session-header__copy">
+                  <div className="session-header__eyebrow">Session</div>
+                  <h1>{selectedSession.title}</h1>
+                  <p>{selectedSession.preview}</p>
+                </div>
+
+                <div className="session-header__meta">
+                  <span className="meta-chip">Local</span>
+                  <span className="meta-chip">{statusLabel(selectedSession.status)}</span>
+                  <span className="meta-chip meta-chip--path">{selectedWorkspace.path}</span>
                 </div>
               </div>
 
@@ -314,13 +429,12 @@ export default function App() {
 
             <footer className="composer">
               <div className="composer__prompt">
-                <div className="composer__label">Composer</div>
                 <textarea
                   aria-label="Composer"
                   data-testid="composer"
-                  value={snapshot.composerDraft}
+                  value={composerDraft}
                   onChange={(event) => {
-                    void updateSnapshot(api, setSnapshot, () => api.updateComposerDraft(event.target.value));
+                    setComposerDraft(event.target.value);
                   }}
                   placeholder="Ask pi to inspect the repo, run a fix, or continue the current thread..."
                 />
@@ -328,21 +442,27 @@ export default function App() {
 
               <div className="composer__bar">
                 <div className="composer__meta">
-                  <span className="badge badge--soft">{api.platform}</span>
-                  <span className="badge badge--soft">Revision {snapshot.revision}</span>
-                  <span className="badge badge--soft">{formatRelativeTime(selectedSession.updatedAt)}</span>
+                  <span className="meta-chip">{api.platform}</span>
+                  <span className="meta-chip">Revision {snapshot.revision}</span>
+                  <span className="meta-chip">{formatRelativeTime(selectedSession.updatedAt)}</span>
                 </div>
 
                 <div className="composer__buttons">
-                  <button className="chip chip--ghost" type="button">
+                  <button className="button button--ghost" disabled type="button">
                     Attach
                   </button>
                   <button
-                    className="chip"
+                    className="button button--primary"
                     data-testid="send"
                     type="button"
                     onClick={() => {
-                      void updateSnapshot(api, setSnapshot, () => api.submitComposerDraft());
+                      void (async () => {
+                        if (composerDraft !== snapshot.composerDraft) {
+                          await updateSnapshot(api, setSnapshot, () => api.updateComposerDraft(composerDraft));
+                        }
+                        const nextState = await updateSnapshot(api, setSnapshot, () => api.submitComposerDraft());
+                        setComposerDraft(nextState.composerDraft);
+                      })();
                     }}
                   >
                     Send
@@ -353,17 +473,17 @@ export default function App() {
           </>
         ) : selectedWorkspace ? (
           <section className="canvas canvas--empty">
-            <div className="canvas__hero">
-              <div className="hero__eyebrow">Workspace</div>
+            <div className="empty-panel">
+              <div className="session-header__eyebrow">Workspace</div>
               <h1>{selectedWorkspace.name}</h1>
               <p>Create a thread for this folder, then jump between sessions from the sidebar.</p>
-              <div className="hero__badges">
-                <span className="badge badge--soft">{selectedWorkspace.path}</span>
-                <span className="badge badge--soft">{formatRelativeTime(selectedWorkspace.lastOpenedAt)}</span>
+              <div className="empty-panel__meta">
+                <span className="meta-chip meta-chip--path">{selectedWorkspace.path}</span>
+                <span className="meta-chip">{formatRelativeTime(selectedWorkspace.lastOpenedAt)}</span>
               </div>
-              <div className="topbar__actions">
+              <div className="empty-panel__actions">
                 <button
-                  className="chip"
+                  className="button button--primary"
                   type="button"
                   onClick={() => {
                     void updateSnapshot(api, setSnapshot, () =>
@@ -378,8 +498,8 @@ export default function App() {
           </section>
         ) : (
           <section className="canvas canvas--empty">
-            <div className="canvas__hero">
-              <div className="hero__eyebrow">Workspace</div>
+            <div className="empty-panel">
+              <div className="session-header__eyebrow">Workspace</div>
               <h1>Open a folder to start</h1>
               <p>Add project folders, group sessions under them, and jump between threads from the sidebar.</p>
             </div>
