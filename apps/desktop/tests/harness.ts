@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
-import { chromium, type Browser, type Page } from "@playwright/test";
+import { chromium, type BrowserContext, type Browser, type Page } from "@playwright/test";
 import type { PiDesktopApi } from "../src/ipc";
 
 const desktopDir = process.cwd();
@@ -42,7 +42,7 @@ export async function launchDesktop(
       throw new Error("Electron browser context did not open");
     }
 
-    const page = context.pages()[0] ?? (await context.newPage());
+    const page = await waitForElectronPage(context);
     await page.waitForLoadState("domcontentloaded");
     await page.waitForFunction(() => Boolean((window as PiAppWindow).piApp), undefined, { timeout: 15_000 });
 
@@ -164,4 +164,8 @@ async function waitForCdpEndpoint(port: number): Promise<void> {
   }
 
   throw new Error(`Timed out waiting for Electron DevTools endpoint on port ${port}`);
+}
+
+async function waitForElectronPage(browserContext: BrowserContext): Promise<Page> {
+  return browserContext.pages()[0] ?? browserContext.waitForEvent("page", { timeout: 15_000 });
 }
