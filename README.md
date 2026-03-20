@@ -4,6 +4,10 @@ Experimental Electron desktop shell for `pi` sessions.
 
 This repo packages a desktop UI around `@mariozechner/pi-coding-agent`. It is not a standalone coding agent runtime. The app depends on the upstream `pi` package for session management, model/auth setup, and agent execution.
 
+![pi-app demo](./docs/readme/demo.gif)
+
+[Download the MP4 demo](./docs/readme/demo.mp4)
+
 ## Status
 
 - Experimental
@@ -50,6 +54,12 @@ Run the default test suite:
 
 ```bash
 pnpm test
+```
+
+Regenerate the README demo assets:
+
+```bash
+pnpm --filter @pi-app/desktop demo:readme
 ```
 
 ## Repository Layout
