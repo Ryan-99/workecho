@@ -9,14 +9,22 @@ import type {
   WorkspaceCatalogEntry,
   WorkspaceCatalogSnapshot,
   WorkspaceId,
+  WorktreeCatalogEntry,
+  WorktreeCatalogSnapshot,
+  WorktreeId,
 } from "@pi-app/catalogs";
 import { sessionKey } from "./session-supervisor-utils.js";
 
 type CatalogFileState = {
-  version: 1;
+  version: 2;
   workspaces: WorkspaceCatalogEntry[];
   sessions: SessionCatalogEntry[];
+  worktrees: WorktreeCatalogEntry[];
   sessionFiles: Record<string, string>;
+};
+
+type ParsedCatalogFileState = Partial<Omit<CatalogFileState, "version">> & {
+  version?: 1 | 2;
 };
 
 export interface JsonCatalogStoreOptions {
@@ -71,11 +79,54 @@ export class JsonCatalogStore implements SessionFileCatalogStorage {
       await this.mutateState((state) => {
         state.workspaces = state.workspaces.filter((workspace) => workspace.workspaceId !== workspaceId);
         state.sessions = state.sessions.filter((session) => session.workspaceId !== workspaceId);
+        state.worktrees = state.worktrees.filter((worktree) => worktree.workspaceId !== workspaceId);
         for (const key of Object.keys(state.sessionFiles)) {
           if (key.startsWith(`${workspaceId}:`)) {
             delete state.sessionFiles[key];
           }
         }
+      });
+    },
+  };
+
+  readonly worktrees = {
+    listWorktrees: async (workspaceId?: WorkspaceId): Promise<WorktreeCatalogSnapshot> => {
+      const state = await this.getState();
+      return {
+        worktrees: [...state.worktrees]
+          .filter((entry) => (workspaceId ? entry.workspaceId === workspaceId : true))
+          .sort(compareWorktreeEntries)
+          .map(cloneWorktreeEntry),
+      };
+    },
+    getWorktree: async (worktreeId: WorktreeId): Promise<WorktreeCatalogEntry | undefined> => {
+      const state = await this.getState();
+      const entry = state.worktrees.find((worktree) => worktree.worktreeId === worktreeId);
+      return entry ? cloneWorktreeEntry(entry) : undefined;
+    },
+    upsertWorktree: async (entry: WorktreeCatalogEntry): Promise<void> => {
+      await this.mutateState((state) => {
+        const index = state.worktrees.findIndex((worktree) => worktree.worktreeId === entry.worktreeId);
+        const next = cloneWorktreeEntry(entry);
+        if (index >= 0) {
+          state.worktrees[index] = next;
+        } else {
+          state.worktrees.push(next);
+        }
+      });
+    },
+    deleteWorktree: async (worktreeId: WorktreeId): Promise<void> => {
+      await this.mutateState((state) => {
+        state.worktrees = state.worktrees.filter((worktree) => worktree.worktreeId !== worktreeId);
+      });
+    },
+    replaceWorkspaceWorktrees: async (
+      workspaceId: WorkspaceId,
+      entries: readonly WorktreeCatalogEntry[],
+    ): Promise<void> => {
+      await this.mutateState((state) => {
+        const nextEntries = entries.map(cloneWorktreeEntry);
+        state.worktrees = [...state.worktrees.filter((worktree) => worktree.workspaceId !== workspaceId), ...nextEntries];
       });
     },
   };
@@ -221,23 +272,25 @@ function defaultCatalogFilePath(): string {
 
 function createEmptyState(): CatalogFileState {
   return {
-    version: 1,
+    version: 2,
     workspaces: [],
     sessions: [],
+    worktrees: [],
     sessionFiles: {},
   };
 }
 
 function parseState(raw: string, filePath: string): CatalogFileState {
-  const parsed = JSON.parse(raw) as Partial<CatalogFileState> | undefined;
-  if (!parsed || parsed.version !== 1) {
+  const parsed = JSON.parse(raw) as ParsedCatalogFileState | undefined;
+  if (!parsed || (parsed.version !== 1 && parsed.version !== 2)) {
     throw new Error(`Unsupported catalog file format in ${filePath}.`);
   }
 
   return {
-    version: 1,
+    version: 2,
     workspaces: Array.isArray(parsed.workspaces) ? parsed.workspaces.map(cloneWorkspaceEntry) : [],
     sessions: Array.isArray(parsed.sessions) ? parsed.sessions.map(cloneSessionEntry) : [],
+    worktrees: Array.isArray(parsed.worktrees) ? parsed.worktrees.map(cloneWorktreeEntry) : [],
     sessionFiles: isRecord(parsed.sessionFiles) ? { ...parsed.sessionFiles } : {},
   };
 }
@@ -255,6 +308,16 @@ function compareSessionEntries(left: SessionCatalogEntry, right: SessionCatalogE
   return right.updatedAt.localeCompare(left.updatedAt);
 }
 
+function compareWorktreeEntries(left: WorktreeCatalogEntry, right: WorktreeCatalogEntry): number {
+  if (left.kind !== right.kind) {
+    return left.kind === "primary" ? -1 : 1;
+  }
+  if (left.pinned && !right.pinned) return -1;
+  if (!left.pinned && right.pinned) return 1;
+  if (left.updatedAt !== right.updatedAt) return right.updatedAt.localeCompare(left.updatedAt);
+  return left.displayName.localeCompare(right.displayName);
+}
+
 function rankSessionStatus(status: SessionCatalogEntry["status"]): number {
   if (status === "running") return 0;
   if (status === "idle") return 1;
@@ -270,6 +333,10 @@ function cloneSessionEntry(entry: SessionCatalogEntry): SessionCatalogEntry {
     ...entry,
     sessionRef: { ...entry.sessionRef },
   };
+}
+
+function cloneWorktreeEntry(entry: WorktreeCatalogEntry): WorktreeCatalogEntry {
+  return { ...entry };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

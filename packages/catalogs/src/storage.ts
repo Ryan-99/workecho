@@ -5,6 +5,9 @@ import type {
   WorkspaceCatalogEntry,
   WorkspaceCatalogSnapshot,
   WorkspaceId,
+  WorktreeCatalogEntry,
+  WorktreeCatalogSnapshot,
+  WorktreeId,
 } from "./types.js";
 
 export interface WorkspaceCatalogStorage {
@@ -21,7 +24,16 @@ export interface SessionCatalogStorage {
   deleteSession(sessionRef: SessionRef): Promise<void>;
 }
 
+export interface WorktreeCatalogStorage {
+  listWorktrees(workspaceId?: WorkspaceId): Promise<WorktreeCatalogSnapshot>;
+  getWorktree(worktreeId: WorktreeId): Promise<WorktreeCatalogEntry | undefined>;
+  upsertWorktree(entry: WorktreeCatalogEntry): Promise<void>;
+  deleteWorktree(worktreeId: WorktreeId): Promise<void>;
+  replaceWorkspaceWorktrees(workspaceId: WorkspaceId, entries: readonly WorktreeCatalogEntry[]): Promise<void>;
+}
+
 export interface CatalogStorage {
   workspaces: WorkspaceCatalogStorage;
   sessions: SessionCatalogStorage;
+  worktrees: WorktreeCatalogStorage;
 }
