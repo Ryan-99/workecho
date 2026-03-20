@@ -1,9 +1,12 @@
 node_modules/
 .turbo/
+plans/
 dist/
 build/
 out/
 playwright-report/
 test-results/
 .DS_Store
-
+tmp-chat-parity.png
+tmp-latest-design.png
+tmp-sample-design.png
