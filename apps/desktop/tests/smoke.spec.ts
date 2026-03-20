@@ -21,7 +21,7 @@ test("boots the Codex-style shell with an empty workspace catalog", async () => 
   try {
     const window = await harness.firstWindow();
     await expect(window.getByRole("button", { name: "New thread" })).toBeVisible();
-    await expect(window.getByRole("button", { name: "Threads" })).toBeVisible();
+    await expect(window.getByRole("button", { name: "Open first folder" })).toBeVisible();
     await expect(window.getByTestId("empty-state")).toBeVisible();
 
     const state = await getDesktopState(window);

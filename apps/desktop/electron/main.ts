@@ -97,6 +97,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(desktopIpc.createSession, (_event, input: CreateSessionInput) =>
     store.createSession(input),
   );
+  ipcMain.handle(desktopIpc.cancelCurrentRun, () => store.cancelCurrentRun());
   ipcMain.handle(desktopIpc.updateComposerDraft, (_event, composerDraft: string) =>
     store.updateComposerDraft(composerDraft),
   );

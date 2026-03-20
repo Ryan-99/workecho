@@ -15,7 +15,13 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "types": ["node", "vite/client"]
+    "types": ["node", "vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@pi-app/pi-sdk-driver": ["../../packages/pi-sdk-driver/src/index.ts"],
+      "@pi-app/catalogs": ["../../packages/catalogs/src/index.ts"],
+      "@pi-app/session-driver": ["../../packages/session-driver/src/index.ts"]
+    }
   },
   "include": ["src", "vite.config.ts"],
   "exclude": ["electron", "dist", "dist-electron", "node_modules"]

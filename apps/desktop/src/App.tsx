@@ -1,13 +1,12 @@
-import { useEffect, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import {
   getSelectedSession,
   getSelectedWorkspace,
   type DesktopAppState,
-  type SessionRecord,
   type WorkspaceRecord,
 } from "./desktop-state";
-import { ClockIcon, FolderIcon, PlusIcon, SettingsIcon, SparkIcon } from "./icons";
-import { MessageMarkdown } from "./message-markdown";
+import { FolderIcon, PlusIcon, SettingsIcon } from "./icons";
+import { TimelineItem } from "./timeline-item";
 
 function useDesktopAppState() {
   const [snapshot, setSnapshot] = useState<DesktopAppState | null>(null);
@@ -38,12 +37,6 @@ function useDesktopAppState() {
   }, []);
 
   return [snapshot, setSnapshot] as const;
-}
-
-function statusLabel(status: SessionRecord["status"]): string {
-  if (status === "running") return "running";
-  if (status === "failed") return "error";
-  return "idle";
 }
 
 function formatRelativeTime(value: string): string {
@@ -78,9 +71,47 @@ function updateSnapshot(
   });
 }
 
+function RunningStatus({ startedAt }: { readonly startedAt?: string }) {
+  const [label, setLabel] = useState(() => formatRunningLabel(startedAt));
+
+  useEffect(() => {
+    setLabel(formatRunningLabel(startedAt));
+    if (!startedAt) {
+      return undefined;
+    }
+
+    const interval = window.setInterval(() => {
+      setLabel(formatRunningLabel(startedAt));
+    }, 1000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [startedAt]);
+
+  return <>{label}</>;
+}
+
+function formatRunningLabel(startedAt: string | undefined): string {
+  if (!startedAt) {
+    return "Working…";
+  }
+
+  const diffMs = Math.max(0, Date.now() - Date.parse(startedAt));
+  const seconds = Math.max(1, Math.floor(diffMs / 1000));
+  if (seconds < 60) {
+    return `Working for ${seconds}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return remaining === 0 ? `Working for ${minutes}m` : `Working for ${minutes}m ${remaining}s`;
+}
+
 export default function App() {
   const [snapshot, setSnapshot] = useDesktopAppState();
   const [composerDraft, setComposerDraft] = useState("");
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const api = window.piApp;
 
   const selectedWorkspace = snapshot ? (getSelectedWorkspace(snapshot) ?? snapshot.workspaces[0]) : undefined;
@@ -92,7 +123,7 @@ export default function App() {
       return;
     }
     setComposerDraft(snapshot.composerDraft);
-  }, [selectedSessionKey, snapshot]);
+  }, [selectedSessionKey]);
 
   useEffect(() => {
     if (!api || !snapshot || composerDraft === snapshot.composerDraft) {
@@ -107,6 +138,16 @@ export default function App() {
       window.clearTimeout(timeout);
     };
   }, [api, composerDraft, setSnapshot, snapshot]);
+
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) {
+      return undefined;
+    }
+
+    composer.style.height = "0px";
+    composer.style.height = `${Math.min(composer.scrollHeight, 220)}px`;
+  }, [composerDraft]);
 
   if (!api || !snapshot) {
     return (
@@ -163,21 +204,6 @@ export default function App() {
             <PlusIcon />
             <span>New thread</span>
           </button>
-
-          <nav className="rail" aria-label="Primary">
-            <button className="rail__item rail__item--active" disabled type="button">
-              <FolderIcon />
-              <span>Threads</span>
-            </button>
-            <button className="rail__item" disabled type="button">
-              <ClockIcon />
-              <span>Automations</span>
-            </button>
-            <button className="rail__item" disabled type="button">
-              <SparkIcon />
-              <span>Skills</span>
-            </button>
-          </nav>
         </div>
 
         <div className="sidebar__section">
@@ -302,38 +328,15 @@ export default function App() {
         {selectedWorkspace && selectedSession ? (
           <>
             <section className="canvas">
-              <div className="session-header">
-                <div className="session-header__copy">
-                  <div className="session-header__eyebrow">Session</div>
-                  <h1>{selectedSession.title}</h1>
-                  <p>{selectedSession.preview}</p>
-                </div>
-
-                <div className="session-header__meta">
-                  <span className="meta-chip">Local</span>
-                  <span className="meta-chip">{statusLabel(selectedSession.status)}</span>
-                  <span className="meta-chip meta-chip--path">{selectedWorkspace.path}</span>
-                </div>
-              </div>
-
               {snapshot.lastError ? <div className="error-banner">{snapshot.lastError}</div> : null}
 
               <div className="timeline-pane">
                 <div className="timeline" data-testid="transcript">
                   {selectedSession.transcript.length === 0 ? (
-                    <article className="message message--assistant">
-                      <div className="message__role">assistant</div>
-                      <p>Start with a prompt to continue this thread.</p>
-                    </article>
+                    <div className="timeline-empty">Send a prompt to start the session.</div>
                   ) : (
-                    selectedSession.transcript.map((message) => (
-                      <article className={`message message--${message.role}`} key={message.id}>
-                        <div className="message__meta">
-                          <span className="message__role">{message.role}</span>
-                          <span className="message__time">{formatRelativeTime(message.createdAt)}</span>
-                        </div>
-                        <MessageMarkdown text={message.text} />
-                      </article>
+                    selectedSession.transcript.map((item) => (
+                      <TimelineItem item={item} key={item.id} />
                     ))
                   )}
                 </div>
@@ -341,10 +344,11 @@ export default function App() {
             </section>
 
             <footer className="composer">
-              <div className="composer__prompt">
+              <div className="composer__surface">
                 <textarea
                   aria-label="Composer"
                   data-testid="composer"
+                  ref={composerRef}
                   value={composerDraft}
                   onChange={(event) => {
                     setComposerDraft(event.target.value);
@@ -352,26 +356,28 @@ export default function App() {
                   onKeyDown={handleComposerKeyDown}
                   placeholder="Ask pi to inspect the repo, run a fix, or continue the current thread..."
                 />
-              </div>
-
-              <div className="composer__bar">
-                <div className="composer__meta">
-                  <span className="meta-chip">{api.platform}</span>
-                  <span className="meta-chip">Revision {snapshot.revision}</span>
-                  <span className="meta-chip">{formatRelativeTime(selectedSession.updatedAt)}</span>
-                </div>
-
-                <div className="composer__buttons">
-                  <button className="button button--ghost" disabled type="button">
-                    Attach
-                  </button>
+                <div className="composer__bar">
+                  <div className="composer__hint">
+                    {selectedSession.status === "running" ? (
+                      <RunningStatus startedAt={selectedSession.runningSince} />
+                    ) : (
+                      "Enter to send · Shift+Enter for newline"
+                    )}
+                  </div>
                   <button
                     className="button button--primary"
                     data-testid="send"
                     type="button"
-                    onClick={submitComposerDraft}
+                    disabled={!composerDraft.trim() && selectedSession.status !== "running"}
+                    onClick={() => {
+                      if (selectedSession.status === "running") {
+                        void updateSnapshot(api, setSnapshot, () => api.cancelCurrentRun());
+                        return;
+                      }
+                      submitComposerDraft();
+                    }}
                   >
-                    Send
+                    {selectedSession.status === "running" ? "Stop" : "Send"}
                   </button>
                 </div>
               </div>

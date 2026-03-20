@@ -175,6 +175,7 @@ export function transcriptFromMessages(messages: readonly unknown[], fallbackTim
     }
 
     transcript.push({
+      kind: "message",
       id: typeof message.id === "string" ? message.id : `${role}-${index}`,
       role,
       text,

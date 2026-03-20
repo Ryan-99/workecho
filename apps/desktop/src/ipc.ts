@@ -9,6 +9,7 @@ export const desktopIpc = {
   syncCurrentWorkspace: "pi-app:sync-current-workspace",
   selectSession: "pi-app:select-session",
   createSession: "pi-app:create-session",
+  cancelCurrentRun: "pi-app:cancel-current-run",
   updateComposerDraft: "pi-app:update-composer-draft",
   submitComposerDraft: "pi-app:submit-composer-draft",
   ping: "app:ping",
@@ -29,6 +30,7 @@ export interface PiDesktopApi {
   syncCurrentWorkspace(): Promise<DesktopAppState>;
   selectSession(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
   createSession(input: CreateSessionInput): Promise<DesktopAppState>;
+  cancelCurrentRun(): Promise<DesktopAppState>;
   updateComposerDraft(composerDraft: string): Promise<DesktopAppState>;
   submitComposerDraft(): Promise<DesktopAppState>;
   openExternal(url: string): Promise<void>;

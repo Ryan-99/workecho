@@ -1,8 +1,6 @@
-import type { SessionTranscriptMessage, SessionTranscriptRole } from "@pi-app/pi-sdk-driver";
-
 export type SessionStatus = "idle" | "running" | "failed";
-export type SessionRole = SessionTranscriptRole;
-export type TranscriptMessage = SessionTranscriptMessage;
+export type { SessionRole, TranscriptMessage } from "./timeline-types";
+import type { TranscriptMessage } from "./timeline-types";
 
 export interface SessionRecord {
   readonly id: string;
@@ -10,6 +8,7 @@ export interface SessionRecord {
   readonly updatedAt: string;
   readonly preview: string;
   readonly status: SessionStatus;
+  readonly runningSince?: string;
   readonly transcript: readonly TranscriptMessage[];
 }
 

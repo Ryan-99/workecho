@@ -1,5 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { PiSdkDriver, type PiSdkDriverConfig } from "@pi-app/pi-sdk-driver";
 import type { SessionCatalogEntry } from "@pi-app/catalogs";
 import type { SessionDriverEvent, SessionRef, WorkspaceRef } from "@pi-app/session-driver";
@@ -12,23 +11,29 @@ import {
   type WorkspaceSessionTarget,
 } from "../src/desktop-state";
 import {
+  applyTimelineEvent,
+  appendAssistantDelta,
+  appendUserMessage,
+  clearActiveAssistantMessage,
+  type RunMetrics,
+} from "./app-store-timeline";
+import { applySessionEventState } from "./app-store-session-state";
+import {
+  readPersistedUiState,
+  type PersistedUiState,
+  writePersistedUiState,
+} from "./app-store-persistence";
+import {
   buildWorkspaceRecords,
   cloneTranscriptMessage,
-  makeTranscriptMessage,
   resolveSelectedSessionId,
   resolveSelectedWorkspaceId,
   sessionKey,
+  TRANSCRIPT_HISTORY_LIMIT,
   toSessionRef,
 } from "./app-store-utils";
 
 type StateListener = (state: DesktopAppState) => void;
-
-interface PersistedUiState {
-  readonly selectedWorkspaceId?: string;
-  readonly selectedSessionId?: string;
-  readonly composerDraft?: string;
-  readonly transcripts?: Record<string, readonly TranscriptMessage[]>;
-}
 
 interface RefreshStateOptions {
   readonly selectedWorkspaceId?: string;
@@ -50,7 +55,10 @@ export class DesktopAppStore {
   private readonly transcriptCache = new Map<string, TranscriptMessage[]>();
   private readonly sessionSubscriptions = new Map<string, () => void>();
   private readonly activeAssistantMessageBySession = new Map<string, string>();
+  private readonly runningSinceBySession = new Map<string, string>();
+  private readonly runMetricsBySession = new Map<string, RunMetrics>();
   private readonly initialWorkspacePaths: readonly string[];
+  private persistTimer: NodeJS.Timeout | undefined;
   private initPromise: Promise<void> | undefined;
 
   constructor(options: DesktopAppStoreOptions) {
@@ -211,10 +219,8 @@ export class DesktopAppStore {
     }
 
     const key = sessionKey(sessionRef);
-    const transcript = [...(this.transcriptCache.get(key) ?? [])];
-    transcript.push(makeTranscriptMessage("user", text));
-    this.transcriptCache.set(key, transcript);
-    this.clearActiveAssistantMessage(sessionRef);
+    const transcript = appendUserMessage(this.transcriptCache, sessionRef, text);
+    clearActiveAssistantMessage(this.activeAssistantMessageBySession, sessionRef);
 
     try {
       await this.ensureSessionReady(sessionRef);
@@ -225,6 +231,28 @@ export class DesktopAppStore {
       });
     } catch (error) {
       this.transcriptCache.set(key, transcript.slice(0, -1));
+      return this.withError(error);
+    }
+  }
+
+  async cancelCurrentRun(): Promise<DesktopAppState> {
+    await this.initialize();
+    const sessionRef = this.selectedSessionRef();
+    if (!sessionRef) {
+      return this.emit();
+    }
+
+    try {
+      await this.driver.cancelCurrentRun(sessionRef);
+      clearActiveAssistantMessage(this.activeAssistantMessageBySession, sessionRef);
+      this.state = {
+        ...this.state,
+        lastError: undefined,
+        revision: this.state.revision + 1,
+      };
+      this.schedulePersistUiState();
+      return this.emit();
+    } catch (error) {
       return this.withError(error);
     }
   }
@@ -274,7 +302,12 @@ export class DesktopAppStore {
 
     await this.pruneStaleSessionSubscriptions(sessionsSnapshot.sessions);
 
-    let workspaces = buildWorkspaceRecords(workspacesSnapshot.workspaces, sessionsSnapshot.sessions, this.transcriptCache);
+    let workspaces = buildWorkspaceRecords(
+      workspacesSnapshot.workspaces,
+      sessionsSnapshot.sessions,
+      this.transcriptCache,
+      this.runningSinceBySession,
+    );
     const selectedWorkspaceId = resolveSelectedWorkspaceId(
       options.selectedWorkspaceId ?? this.state.selectedWorkspaceId,
       workspaces,
@@ -290,7 +323,12 @@ export class DesktopAppStore {
         workspaceId: selectedWorkspaceId,
         sessionId: selectedSessionId,
       });
-      workspaces = buildWorkspaceRecords(workspacesSnapshot.workspaces, sessionsSnapshot.sessions, this.transcriptCache);
+      workspaces = buildWorkspaceRecords(
+        workspacesSnapshot.workspaces,
+        sessionsSnapshot.sessions,
+        this.transcriptCache,
+        this.runningSinceBySession,
+      );
     }
 
     this.state = {
@@ -327,6 +365,8 @@ export class DesktopAppStore {
         unsubscribe();
         this.sessionSubscriptions.delete(key);
         this.activeAssistantMessageBySession.delete(key);
+        this.runningSinceBySession.delete(key);
+        this.runMetricsBySession.delete(key);
         this.transcriptCache.delete(key);
       }
     }
@@ -360,12 +400,7 @@ export class DesktopAppStore {
     const transcript = await this.driver.getTranscript(sessionRef);
     this.transcriptCache.set(
       key,
-      transcript.map((message) => ({
-        id: message.id,
-        role: message.role,
-        text: message.text,
-        createdAt: message.createdAt,
-      })),
+      transcript.map(cloneTranscriptMessage),
     );
   }
 
@@ -386,10 +421,10 @@ export class DesktopAppStore {
 
     switch (event.type) {
       case "assistantDelta":
-        this.appendAssistantDelta(event.sessionRef, event.text);
+        appendAssistantDelta(this.transcriptCache, this.activeAssistantMessageBySession, event.sessionRef, event.text);
         break;
       case "runFailed":
-        this.clearActiveAssistantMessage(event.sessionRef);
+        clearActiveAssistantMessage(this.activeAssistantMessageBySession, event.sessionRef);
         this.state = {
           ...this.state,
           lastError: event.error.message,
@@ -397,7 +432,7 @@ export class DesktopAppStore {
         break;
       case "runCompleted":
       case "sessionClosed":
-        this.clearActiveAssistantMessage(event.sessionRef);
+        clearActiveAssistantMessage(this.activeAssistantMessageBySession, event.sessionRef);
         break;
       case "sessionOpened":
       case "sessionUpdated":
@@ -415,38 +450,18 @@ export class DesktopAppStore {
       this.sessionSubscriptions.delete(key);
     }
 
-    await this.refreshState();
-  }
-
-  private appendAssistantDelta(sessionRef: SessionRef, text: string): void {
-    const key = sessionKey(sessionRef);
-    const transcript = [...(this.transcriptCache.get(key) ?? [])];
-    const activeId = this.activeAssistantMessageBySession.get(key);
-
-    if (activeId) {
-      const index = transcript.findIndex((message) => message.id === activeId);
-      const current = index >= 0 ? transcript[index] : undefined;
-      if (current) {
-        transcript[index] = {
-          ...current,
-          text: `${current.text}${text}`,
-        };
-      } else {
-        const message = makeTranscriptMessage("assistant", text);
-        transcript.push(message);
-        this.activeAssistantMessageBySession.set(key, message.id);
-      }
+    applyTimelineEvent(this.transcriptCache, event, this.runMetricsBySession, this.runningSinceBySession);
+    this.state = applySessionEventState(this.state, event, this.transcriptCache, this.runningSinceBySession);
+    this.state = {
+      ...this.state,
+      lastError: event.type === "runFailed" ? event.error.message : this.state.lastError,
+    };
+    if (event.type === "runCompleted" || event.type === "runFailed" || event.type === "sessionClosed") {
+      await this.persistUiState();
     } else {
-      const message = makeTranscriptMessage("assistant", text);
-      transcript.push(message);
-      this.activeAssistantMessageBySession.set(key, message.id);
+      this.schedulePersistUiState();
     }
-
-    this.transcriptCache.set(key, transcript);
-  }
-
-  private clearActiveAssistantMessage(sessionRef: SessionRef): void {
-    this.activeAssistantMessageBySession.delete(sessionKey(sessionRef));
+    this.emit();
   }
 
   private workspaceRefFromState(workspaceId: string): WorkspaceRef | undefined {
@@ -474,32 +489,35 @@ export class DesktopAppStore {
   }
 
   private async readUiState(): Promise<PersistedUiState> {
-    try {
-      const raw = await readFile(this.uiStateFilePath, "utf8");
-      const parsed = JSON.parse(raw) as PersistedUiState;
-      return {
-        selectedWorkspaceId: parsed.selectedWorkspaceId,
-        selectedSessionId: parsed.selectedSessionId,
-        composerDraft: parsed.composerDraft ?? "",
-        transcripts: parsed.transcripts,
-      };
-    } catch {
-      return {};
-    }
+    return readPersistedUiState(this.uiStateFilePath);
   }
 
   private async persistUiState(): Promise<void> {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = undefined;
+    }
     const payload: PersistedUiState = {
       selectedWorkspaceId: this.state.selectedWorkspaceId || undefined,
       selectedSessionId: this.state.selectedSessionId || undefined,
       composerDraft: this.state.composerDraft || undefined,
       transcripts: Object.fromEntries(
-        [...this.transcriptCache.entries()].map(([key, transcript]) => [key, transcript.slice(-120)]),
+        [...this.transcriptCache.entries()].map(([key, transcript]) => [key, transcript.slice(-TRANSCRIPT_HISTORY_LIMIT)]),
       ),
     };
 
-    await mkdir(dirname(this.uiStateFilePath), { recursive: true });
-    await writeFile(this.uiStateFilePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    await writePersistedUiState(this.uiStateFilePath, payload);
+  }
+
+  private schedulePersistUiState(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+    }
+
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = undefined;
+      void this.persistUiState();
+    }, 250);
   }
 
   private emit(): DesktopAppState {
