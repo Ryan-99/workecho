@@ -99,6 +99,7 @@ export class DesktopAppStore {
   private readonly composerDraftsBySession = new Map<string, string>();
   private readonly composerAttachmentsBySession = new Map<string, ComposerImageAttachment[]>();
   private readonly sessionConfigBySession = new Map<string, SessionConfig>();
+  private readonly lastViewedAtBySession = new Map<string, string>();
   private readonly runtimeByWorkspace = new Map<string, RuntimeSnapshot>();
   private readonly sessionErrorsBySession = new Map<string, string>();
   private readonly sessionSubscriptions = new Map<string, () => void>();
@@ -403,6 +404,9 @@ export class DesktopAppStore {
       lastError: undefined,
       revision: this.state.revision + 1,
     };
+    if (activeView === "threads") {
+      this.markSelectedSessionViewedIfVisible();
+    }
     await this.persistUiState();
     return this.emit();
   }
@@ -752,8 +756,15 @@ export class DesktopAppStore {
           ...this.state.notificationPreferences,
           ...persisted.notificationPreferences,
         },
+        lastViewedAtBySession: persisted.lastViewedAtBySession ?? {},
       };
-    await this.migrateLegacyPersistence(persisted);
+      await this.migrateLegacyPersistence(persisted);
+      this.lastViewedAtBySession.clear();
+      for (const [key, viewedAt] of Object.entries(persisted.lastViewedAtBySession ?? {})) {
+        if (viewedAt) {
+          this.lastViewedAtBySession.set(key, viewedAt);
+        }
+      }
       this.composerDraftsBySession.clear();
       for (const [key, draft] of Object.entries(persisted.composerDraftsBySession ?? {})) {
         if (draft) {
@@ -840,6 +851,7 @@ export class DesktopAppStore {
       this.transcriptCache,
       this.runningSinceBySession,
       this.sessionConfigBySession,
+      this.lastViewedAtBySession,
     );
     const worktreesByWorkspace = buildWorktreeRecords(workspacesSnapshot.workspaces, worktreeEntries);
     const liveWorkspaceIds = new Set(workspaces.map((workspace) => workspace.id));
@@ -872,6 +884,7 @@ export class DesktopAppStore {
         this.transcriptCache,
         this.runningSinceBySession,
         this.sessionConfigBySession,
+        this.lastViewedAtBySession,
       );
     }
 
@@ -879,19 +892,23 @@ export class DesktopAppStore {
       await this.ensureRuntimeLoaded(selectedWorkspaceId);
     }
 
-      this.state = {
-        ...this.state,
-        workspaces,
-        worktreesByWorkspace,
-        selectedWorkspaceId,
-        selectedSessionId,
-        activeView: options.activeView ?? this.state.activeView,
-        runtimeByWorkspace: this.serializeRuntimeState(),
-        composerDraft: this.resolveComposerDraft(selectedWorkspaceId, selectedSessionId, options.composerDraft),
+    const activeView = options.activeView ?? this.state.activeView;
+    this.state = {
+      ...this.state,
+      workspaces,
+      worktreesByWorkspace,
+      selectedWorkspaceId,
+      selectedSessionId,
+      activeView,
+      runtimeByWorkspace: this.serializeRuntimeState(),
+      lastViewedAtBySession: Object.fromEntries(this.lastViewedAtBySession.entries()),
+      composerDraft: this.resolveComposerDraft(selectedWorkspaceId, selectedSessionId, options.composerDraft),
       composerAttachments: this.resolveComposerAttachments(selectedWorkspaceId, selectedSessionId),
       lastError: this.resolveSelectedSessionError(selectedWorkspaceId, selectedSessionId, options.clearLastError),
       revision: this.state.revision + 1,
     };
+
+    this.markSelectedSessionViewedIfVisible();
 
     await this.persistUiState();
     return this.emit();
@@ -924,6 +941,7 @@ export class DesktopAppStore {
         this.composerDraftsBySession.delete(key);
         this.composerAttachmentsBySession.delete(key);
         this.sessionConfigBySession.delete(key);
+        this.lastViewedAtBySession.delete(key);
         this.sessionErrorsBySession.delete(key);
         this.loadedTranscriptKeys.delete(key);
         this.transcriptCache.delete(key);
@@ -1066,9 +1084,17 @@ export class DesktopAppStore {
       activeAssistantMessageBySession: this.activeAssistantMessageBySession,
       activeWorkingActivityBySession: this.activeWorkingActivityBySession,
     });
-    this.state = applySessionEventState(this.state, event, this.transcriptCache, this.runningSinceBySession);
+    this.state = applySessionEventState(
+      this.state,
+      event,
+      this.transcriptCache,
+      this.runningSinceBySession,
+      this.lastViewedAtBySession,
+    );
+    this.markSessionViewedIfVisible(event.sessionRef);
     this.state = {
       ...this.state,
+      lastViewedAtBySession: Object.fromEntries(this.lastViewedAtBySession.entries()),
       lastError: this.resolveSelectedSessionError(this.state.selectedWorkspaceId, this.state.selectedSessionId, false),
     };
     this.persistTranscriptCacheForSession(event.sessionRef);
@@ -1288,6 +1314,7 @@ export class DesktopAppStore {
       composerDraft: this.state.composerDraft || undefined,
       composerDraftsBySession: Object.fromEntries(this.composerDraftsBySession.entries()),
       notificationPreferences: this.state.notificationPreferences,
+      lastViewedAtBySession: Object.fromEntries(this.lastViewedAtBySession.entries()),
     };
 
     await writePersistedUiState(this.uiStateFilePath, payload);
@@ -1355,6 +1382,60 @@ export class DesktopAppStore {
     };
     await this.persistUiState();
     return this.emit();
+  }
+
+  private markSelectedSessionViewedIfVisible(): void {
+    if (this.state.activeView !== "threads" || !this.state.selectedWorkspaceId || !this.state.selectedSessionId) {
+      return;
+    }
+
+    this.markSessionViewedIfVisible({
+      workspaceId: this.state.selectedWorkspaceId,
+      sessionId: this.state.selectedSessionId,
+    });
+  }
+
+  private markSessionViewedIfVisible(sessionRef: SessionRef): void {
+    if (
+      this.state.activeView !== "threads" ||
+      this.state.selectedWorkspaceId !== sessionRef.workspaceId ||
+      this.state.selectedSessionId !== sessionRef.sessionId
+    ) {
+      return;
+    }
+
+    const viewedAt = this.sessionFromState(sessionRef)?.updatedAt ?? new Date().toISOString();
+    this.markSessionViewed(sessionRef, viewedAt);
+  }
+
+  private markSessionViewed(sessionRef: SessionRef, viewedAt: string): void {
+    const key = sessionKey(sessionRef);
+    const current = this.lastViewedAtBySession.get(key);
+    if (current && current >= viewedAt) {
+      return;
+    }
+
+    this.lastViewedAtBySession.set(key, viewedAt);
+    this.state = {
+      ...this.state,
+      workspaces: this.state.workspaces.map((workspace) =>
+        workspace.id === sessionRef.workspaceId
+          ? {
+              ...workspace,
+              sessions: workspace.sessions.map((session) =>
+                session.id === sessionRef.sessionId
+                  ? {
+                      ...session,
+                      lastViewedAt: viewedAt,
+                      hasUnseenUpdate: false,
+                    }
+                  : session,
+              ),
+            }
+          : workspace,
+      ),
+      lastViewedAtBySession: Object.fromEntries(this.lastViewedAtBySession.entries()),
+    };
   }
 
   private resolveComposerDraft(

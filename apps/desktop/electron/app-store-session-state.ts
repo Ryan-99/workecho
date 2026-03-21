@@ -8,10 +8,12 @@ export function applySessionEventState(
   event: SessionDriverEvent,
   transcriptCache: Map<string, TranscriptMessage[]>,
   runningSinceBySession: Map<string, string>,
+  lastViewedAtBySession: Map<string, string>,
 ): DesktopAppState {
   const key = sessionKey(event.sessionRef);
   const transcript = (transcriptCache.get(key) ?? []).map(cloneTranscriptMessage);
   const preview = previewFromTranscript(transcript);
+  const lastViewedAt = lastViewedAtBySession.get(key);
 
   return {
     ...state,
@@ -21,7 +23,14 @@ export function applySessionEventState(
             ...workspace,
             sessions: workspace.sessions.map((session) =>
               session.id === event.sessionRef.sessionId
-                ? updateSessionRecord(session, event, transcript, preview, runningSinceBySession.get(key))
+                ? updateSessionRecord(
+                    session,
+                    event,
+                    transcript,
+                    preview,
+                    runningSinceBySession.get(key),
+                    lastViewedAt,
+                  )
                 : session,
             ),
           }
@@ -37,17 +46,22 @@ function updateSessionRecord(
   transcript: readonly TranscriptMessage[],
   preview: string | undefined,
   runningSince: string | undefined,
+  lastViewedAt: string | undefined,
 ): SessionRecord {
   const snapshot = snapshotForEvent(event);
+  const updatedAt = snapshot?.updatedAt ?? event.timestamp;
 
   return {
     ...session,
     title: snapshot?.title ?? session.title,
-    updatedAt: snapshot?.updatedAt ?? event.timestamp,
+    updatedAt,
+    lastViewedAt,
     archivedAt: snapshot?.archivedAt ?? session.archivedAt,
     preview: preview ?? snapshot?.preview ?? session.preview,
     status: statusForEvent(session.status, event),
     runningSince,
+    hasUnseenUpdate:
+      statusForEvent(session.status, event) !== "running" && Boolean(lastViewedAt && updatedAt > lastViewedAt),
     config: snapshot?.config ?? session.config,
     transcript,
   };

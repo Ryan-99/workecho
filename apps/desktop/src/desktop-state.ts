@@ -26,10 +26,12 @@ export interface SessionRecord {
   readonly id: string;
   readonly title: string;
   readonly updatedAt: string;
+  readonly lastViewedAt?: string;
   readonly archivedAt?: string;
   readonly preview: string;
   readonly status: SessionStatus;
   readonly runningSince?: string;
+  readonly hasUnseenUpdate: boolean;
   readonly config?: SessionConfig;
   readonly transcript: readonly TranscriptMessage[];
 }
@@ -83,6 +85,7 @@ export interface DesktopAppState {
   readonly composerAttachments: readonly ComposerImageAttachment[];
   readonly runtimeByWorkspace: Readonly<Record<string, RuntimeSnapshot>>;
   readonly notificationPreferences: NotificationPreferences;
+  readonly lastViewedAtBySession: Readonly<Record<string, string>>;
   readonly revision: number;
   readonly lastError?: string;
 }
@@ -112,6 +115,7 @@ export function createEmptyDesktopAppState(): DesktopAppState {
       backgroundFailure: true,
       attentionNeeded: true,
     },
+    lastViewedAtBySession: {},
     revision: 0,
   };
 }

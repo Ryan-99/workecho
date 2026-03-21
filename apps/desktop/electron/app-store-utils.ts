@@ -19,6 +19,7 @@ export function buildWorkspaceRecords(
   transcriptCache: Map<string, TranscriptMessage[]>,
   runningSinceBySession: Map<string, string>,
   sessionConfigBySession: Map<string, SessionConfig>,
+  lastViewedAtBySession: Map<string, string>,
 ): WorkspaceRecord[] {
   const linkedWorktreesByPath = new Map(
     worktrees
@@ -45,7 +46,15 @@ export function buildWorkspaceRecords(
         : {}),
       sessions: sessions
         .filter((session) => session.workspaceId === workspace.workspaceId)
-        .map((session) => buildSessionRecord(session, transcriptCache, runningSinceBySession, sessionConfigBySession)),
+        .map((session) =>
+          buildSessionRecord(
+            session,
+            transcriptCache,
+            runningSinceBySession,
+            sessionConfigBySession,
+            lastViewedAtBySession,
+          ),
+        ),
     };
   });
 }
@@ -100,18 +109,22 @@ function buildSessionRecord(
   transcriptCache: Map<string, TranscriptMessage[]>,
   runningSinceBySession: Map<string, string>,
   sessionConfigBySession: Map<string, SessionConfig>,
+  lastViewedAtBySession: Map<string, string>,
 ): SessionRecord {
   const key = sessionKey(session.sessionRef);
   const transcript = transcriptCache.get(key) ?? [];
   const preview = previewFromTranscript(transcript) ?? session.previewSnippet ?? session.title;
+  const lastViewedAt = lastViewedAtBySession.get(key);
   return {
     id: session.sessionRef.sessionId,
     title: session.title,
     updatedAt: session.updatedAt,
+    lastViewedAt,
     archivedAt: session.archivedAt,
     preview,
     status: session.status,
     runningSince: runningSinceBySession.get(key),
+    hasUnseenUpdate: session.status !== "running" && Boolean(lastViewedAt && session.updatedAt > lastViewedAt),
     config: sessionConfigBySession.get(key),
     transcript: transcript.map(cloneTranscriptMessage),
   };

@@ -1492,6 +1492,16 @@ function describeActiveSlashFlow(
   return command.description;
 }
 
+function sessionIndicatorVariant(thread: ThreadListEntry): "running" | "unseen" | "none" {
+  if (thread.session.status === "running") {
+    return "running";
+  }
+  if (thread.session.hasUnseenUpdate) {
+    return "unseen";
+  }
+  return "none";
+}
+
 function ThreadSessionRow({
   active,
   archived = false,
@@ -1505,10 +1515,18 @@ function ThreadSessionRow({
   readonly onAction: () => void;
   readonly onSelect: () => void;
 }) {
+  const indicatorVariant = sessionIndicatorVariant(thread);
   return (
-    <div className={`session-row ${active ? "session-row--active" : ""}`}>
+    <div
+      className={`session-row ${active ? "session-row--active" : ""}`}
+      data-sidebar-indicator={indicatorVariant}
+      data-session-id={thread.session.id}
+    >
       <button className="session-row__select" onClick={onSelect} type="button">
-        <span className={`session-row__status session-row__status--${thread.session.status}`} />
+        <span className="session-row__leading" aria-hidden="true" data-status-indicator={indicatorVariant}>
+          {indicatorVariant === "running" ? <span className="session-row__status session-row__status--running" /> : null}
+          {indicatorVariant === "unseen" ? <span className="session-row__status session-row__status--unseen" /> : null}
+        </span>
         <span className="session-row__body">
           <span className="session-row__title-line">
             <span className="session-row__title">{thread.session.title}</span>

@@ -101,6 +101,10 @@ test("runs two sessions in parallel without sidebar status bleed", async () => {
         sessionBStatus: "running",
       });
 
+    await expect(
+      window.locator(`.session-row[data-session-id="${sessions.sessionAId}"] .session-row__leading`),
+    ).toHaveAttribute("data-status-indicator", "running");
+
     await expect
       .poll(async () => {
         const state = await getDesktopState(window);
@@ -116,6 +120,19 @@ test("runs two sessions in parallel without sidebar status bleed", async () => {
         sessionAStatus: "idle",
         sessionBStatus: "idle",
       });
+
+    await expect(
+      window.locator(`.session-row[data-session-id="${sessions.sessionAId}"] .session-row__leading`),
+    ).toHaveAttribute("data-status-indicator", "unseen");
+    await expect(
+      window.locator(`.session-row[data-session-id="${sessions.sessionBId}"] .session-row__leading`),
+    ).toHaveAttribute("data-status-indicator", "none");
+
+    await window.locator(`.session-row[data-session-id="${sessions.sessionAId}"] .session-row__select`).click();
+    await expect(window.locator(".topbar__session")).toHaveText("Session A");
+    await expect(
+      window.locator(`.session-row[data-session-id="${sessions.sessionAId}"] .session-row__leading`),
+    ).toHaveAttribute("data-status-indicator", "none");
 
     const result = await window.evaluate(async ({ workspaceId, sessionAId, sessionBId }) => {
       const app = (window as PiAppWindow).piApp;

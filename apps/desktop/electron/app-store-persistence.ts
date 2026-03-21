@@ -2,13 +2,14 @@ import type { AppView, NotificationPreferences } from "../src/desktop-state";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 export interface PersistedUiState {
-  readonly version?: 2 | 3;
+  readonly version?: 2 | 3 | 4;
   readonly selectedWorkspaceId?: string;
   readonly selectedSessionId?: string;
   readonly activeView?: AppView;
   readonly composerDraft?: string;
   readonly composerDraftsBySession?: Record<string, string>;
   readonly notificationPreferences?: NotificationPreferences;
+  readonly lastViewedAtBySession?: Record<string, string>;
 }
 
 export interface LegacyPersistedUiState extends PersistedUiState {
@@ -21,13 +22,14 @@ export async function readPersistedUiState(uiStateFilePath: string): Promise<Leg
     const raw = await readFile(uiStateFilePath, "utf8");
     const parsed = JSON.parse(raw) as LegacyPersistedUiState;
     return {
-      version: parsed.version === 3 ? 3 : parsed.version === 2 ? 2 : undefined,
+      version: parsed.version === 4 ? 4 : parsed.version === 3 ? 3 : parsed.version === 2 ? 2 : undefined,
       selectedWorkspaceId: parsed.selectedWorkspaceId,
       selectedSessionId: parsed.selectedSessionId,
       activeView: parsed.activeView,
       composerDraft: parsed.composerDraft ?? "",
       composerDraftsBySession: parsed.composerDraftsBySession,
       notificationPreferences: parsed.notificationPreferences,
+      lastViewedAtBySession: parsed.lastViewedAtBySession,
       composerAttachmentsBySession: parsed.composerAttachmentsBySession,
       transcripts: parsed.transcripts,
     };
@@ -45,7 +47,7 @@ export async function writePersistedUiState(
     uiStateFilePath,
     `${JSON.stringify(
       {
-        version: 3,
+        version: 4,
         ...payload,
       } satisfies PersistedUiState,
       null,
