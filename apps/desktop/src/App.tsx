@@ -5,10 +5,11 @@ import {
   getSelectedWorkspace,
   type AppView,
   type DesktopAppState,
+  type SessionRecord,
   type WorktreeRecord,
   type WorkspaceRecord,
 } from "./desktop-state";
-import { FolderIcon, PlusIcon, SettingsIcon, SkillIcon } from "./icons";
+import { FolderIcon, PlusIcon, SettingsIcon, SkillIcon, WorktreeIcon } from "./icons";
 import { ComposerPanel } from "./composer-panel";
 import {
   buildModelOptions,
@@ -740,6 +741,37 @@ export default function App() {
     void api.toggleWindowMaximize();
   };
 
+  const renderSessionRow = (
+    workspaceId: string,
+    workspaceKind: WorkspaceRecord["kind"],
+    session: SessionRecord,
+    active: boolean,
+  ) => (
+    <button
+      key={session.id}
+      className={`session-row ${active ? "session-row--active" : ""}`}
+      data-workspace-kind={workspaceKind}
+      onClick={() => {
+        void updateSnapshot(api, setSnapshot, () => api.selectSession({ workspaceId, sessionId: session.id }));
+      }}
+      type="button"
+    >
+      <span className={`session-row__status session-row__status--${session.status}`} />
+      <span className="session-row__body">
+        <span className="session-row__title">{session.title}</span>
+        {active && session.preview ? <span className="session-row__preview">{session.preview}</span> : null}
+      </span>
+      <span className="session-row__meta">
+        {workspaceKind === "worktree" ? (
+          <span className="session-row__workspace-icon" aria-hidden="true" title="Worktree">
+            <WorktreeIcon />
+          </span>
+        ) : null}
+        <span className="session-row__time">{formatRelativeTime(session.updatedAt)}</span>
+      </span>
+    </button>
+  );
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -947,30 +979,14 @@ export default function App() {
                       </form>
                     ) : null}
                     <div className="session-list">
-                      {workspace.sessions.map((session) => {
-                        const active = workspace.id === selectedWorkspace?.id && session.id === selectedSession?.id;
-                        return (
-                          <button
-                            key={session.id}
-                            className={`session-row ${active ? "session-row--active" : ""}`}
-                            onClick={() => {
-                              void updateSnapshot(api, setSnapshot, () =>
-                                api.selectSession({ workspaceId: workspace.id, sessionId: session.id }),
-                              );
-                            }}
-                            type="button"
-                          >
-                            <span className={`session-row__status session-row__status--${session.status}`} />
-                            <span className="session-row__body">
-                              <span className="session-row__title">{session.title}</span>
-                              {active && session.preview ? (
-                                <span className="session-row__preview">{session.preview}</span>
-                              ) : null}
-                            </span>
-                            <span className="session-row__time">{formatRelativeTime(session.updatedAt)}</span>
-                          </button>
-                        );
-                      })}
+                      {workspace.sessions.map((session) =>
+                        renderSessionRow(
+                          workspace.id,
+                          workspace.kind,
+                          session,
+                          workspace.id === selectedWorkspace?.id && session.id === selectedSession?.id,
+                        ),
+                      )}
                     </div>
                     {worktrees.length > 0 ? (
                       <div className="worktree-list">
@@ -1046,31 +1062,14 @@ export default function App() {
                               </div>
                               {linkedWorkspace && active ? (
                                 <div className="session-list session-list--nested">
-                                  {linkedWorkspace.sessions.map((session) => {
-                                    const sessionActive =
-                                      linkedWorkspace.id === selectedWorkspace?.id && session.id === selectedSession?.id;
-                                    return (
-                                      <button
-                                        key={session.id}
-                                        className={`session-row ${sessionActive ? "session-row--active" : ""}`}
-                                        onClick={() => {
-                                          void updateSnapshot(api, setSnapshot, () =>
-                                            api.selectSession({ workspaceId: linkedWorkspace.id, sessionId: session.id }),
-                                          );
-                                        }}
-                                        type="button"
-                                      >
-                                        <span className={`session-row__status session-row__status--${session.status}`} />
-                                        <span className="session-row__body">
-                                          <span className="session-row__title">{session.title}</span>
-                                          {sessionActive && session.preview ? (
-                                            <span className="session-row__preview">{session.preview}</span>
-                                          ) : null}
-                                        </span>
-                                        <span className="session-row__time">{formatRelativeTime(session.updatedAt)}</span>
-                                      </button>
-                                    );
-                                  })}
+                                  {linkedWorkspace.sessions.map((session) =>
+                                    renderSessionRow(
+                                      linkedWorkspace.id,
+                                      linkedWorkspace.kind,
+                                      session,
+                                      linkedWorkspace.id === selectedWorkspace?.id && session.id === selectedSession?.id,
+                                    ),
+                                  )}
                                 </div>
                               ) : null}
                             </div>

@@ -407,6 +407,13 @@
   gap: 1px;
 }
 
+.session-row__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .session-row__title {
   font-size: 14px;
   font-weight: 540;
@@ -419,6 +426,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-row__workspace-icon {
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--muted-soft);
+  flex: 0 0 auto;
+}
+
+.session-row__workspace-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.session-row--active .session-row__workspace-icon {
+  color: var(--muted-strong);
 }
 
 .sidebar__footer {

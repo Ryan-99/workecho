@@ -23,6 +23,9 @@ importers:
       '@pi-app/pi-sdk-driver':
         specifier: workspace:*
         version: link:../../packages/pi-sdk-driver
+      '@pi-app/session-driver':
+        specifier: workspace:*
+        version: link:../../packages/session-driver
       react:
         specifier: ^19.1.0
         version: 19.2.4

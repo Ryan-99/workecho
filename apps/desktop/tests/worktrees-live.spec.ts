@@ -57,6 +57,54 @@ test("creates and selects a worktree-backed workspace from the desktop UI", asyn
   }
 });
 
+test("shows a worktree icon in the sidebar without a local text badge", async () => {
+  test.setTimeout(90_000);
+  const userDataDir = await mkdtemp(join(tmpdir(), "pi-app-user-data-"));
+  const workspacePath = await makeGitWorkspace("worktree-sidebar-indicator");
+  const harness = await launchDesktop(userDataDir, [workspacePath]);
+
+  try {
+    const window = await harness.firstWindow();
+    const rootWorkspace = await waitForRootWorkspace(window);
+    if (!rootWorkspace) {
+      throw new Error("Expected an initial workspace");
+    }
+
+    await createSession(window, rootWorkspace.id, "Local thread");
+    const localRow = window.locator(".session-row", { hasText: "Local thread" });
+    await expect(localRow).toBeVisible();
+    await expect(localRow.locator(".session-row__workspace-icon")).toHaveCount(0);
+
+    await window.getByRole("button", { name: `Workspace actions for ${rootWorkspace.name}` }).click();
+    await window.getByRole("button", { name: "Create permanent worktree" }).click();
+
+    await expect
+      .poll(async () => {
+        const state = await getState(window);
+        const selected = state.workspaces.find((workspace) => workspace.id === state.selectedWorkspaceId);
+        return selected?.kind === "worktree";
+      })
+      .toBe(true);
+
+    const worktreeState = await getState(window);
+    const worktreeWorkspace = worktreeState.workspaces.find(
+      (workspace) => workspace.id === worktreeState.selectedWorkspaceId,
+    );
+
+    if (!worktreeWorkspace || worktreeWorkspace.kind !== "worktree") {
+      throw new Error("Expected a selected worktree workspace");
+    }
+
+    await createSession(window, worktreeWorkspace.id, "Worktree thread");
+    const worktreeRow = window.locator(".session-row", { hasText: "Worktree thread" });
+    await expect(worktreeRow).toBeVisible();
+    await expect(worktreeRow.locator(".session-row__workspace-icon")).toHaveCount(1);
+    await expect(window.getByTestId("workspace-list")).not.toContainText("Local project");
+  } finally {
+    await harness.close();
+  }
+});
+
 test("creating a new worktree from a selected worktree thread preserves the thread title", async () => {
   test.setTimeout(90_000);
   const userDataDir = await mkdtemp(join(tmpdir(), "pi-app-user-data-"));
