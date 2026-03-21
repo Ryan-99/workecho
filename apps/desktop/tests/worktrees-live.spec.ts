@@ -53,10 +53,10 @@ test("creates and selects a worktree-backed workspace from the desktop UI", asyn
   }
 });
 
-test("shows worktree-backed threads as thread environment metadata", async () => {
+test("shows a worktree icon in the sidebar without a local text badge", async () => {
   test.setTimeout(90_000);
   const userDataDir = await mkdtemp(join(tmpdir(), "pi-app-user-data-"));
-  const workspacePath = await makeGitWorkspace("worktree-source-session");
+  const workspacePath = await makeGitWorkspace("worktree-sidebar-indicator");
   const harness = await launchDesktop(userDataDir, [workspacePath]);
 
   try {
@@ -65,6 +65,11 @@ test("shows worktree-backed threads as thread environment metadata", async () =>
     if (!rootWorkspace) {
       throw new Error("Expected an initial workspace");
     }
+
+    await createSession(window, rootWorkspace.id, "Local thread");
+    const localRow = window.locator(".session-row", { hasText: "Local thread" });
+    await expect(localRow).toBeVisible();
+    await expect(localRow.locator(".session-row__workspace-icon")).toHaveCount(0);
 
     await window.getByRole("button", { name: `Workspace actions for ${rootWorkspace.name}` }).click();
     await window.getByRole("button", { name: "Create permanent worktree" }).click();
@@ -85,41 +90,11 @@ test("shows worktree-backed threads as thread environment metadata", async () =>
       throw new Error("Expected selected worktree workspace");
     }
 
-    const sessionTitle = "Source worktree thread";
-    await createSession(window, firstWorktree.id, sessionTitle);
-    await expect
-      .poll(async () => {
-        const state = await getState(window);
-        const workspace = state.workspaces.find((entry) => entry.id === firstWorktree.id);
-        return workspace?.sessions.find((entry) => entry.title === sessionTitle) ?? null;
-      })
-      .not.toBeNull();
-
-    const sourceSession = await getState(window).then((state) =>
-      state.workspaces
-        .find((entry) => entry.id === firstWorktree.id)
-        ?.sessions.find((entry) => entry.title === sessionTitle),
-    );
-    if (!sourceSession) {
-      throw new Error("Expected a source worktree session");
-    }
-
-    await window.evaluate(async ({ workspaceId, sessionId }) => {
-      const app = (window as PiAppWindow).piApp;
-      if (!app) {
-        throw new Error("piApp unavailable");
-      }
-      await app.selectSession({ workspaceId, sessionId });
-    }, { workspaceId: firstWorktree.id, sessionId: sourceSession.id });
-    await expect(window.locator(".topbar__session")).toHaveText(sessionTitle);
-    await expect(window.getByTestId("workspace-list")).toContainText(sessionTitle);
-    await expect(window.getByTestId("workspace-list")).toContainText("Worktree ·");
-    await expect(window.getByTestId("workspace-list")).not.toContainText("/Users/");
-
-    await window.locator(".environment-picker__button").click();
-    const environmentMenu = window.locator(".environment-picker__menu");
-    await expect(environmentMenu.getByRole("button", { name: "Local" })).toBeVisible();
-    await expect(environmentMenu.getByRole("button", { name: firstWorktree.name })).toBeVisible();
+    await createSession(window, firstWorktree.id, "Worktree thread");
+    const worktreeRow = window.locator(".session-row", { hasText: "Worktree thread" });
+    await expect(worktreeRow).toBeVisible();
+    await expect(worktreeRow.locator(".session-row__workspace-icon")).toHaveCount(1);
+    await expect(window.getByTestId("workspace-list")).not.toContainText("Local project");
   } finally {
     await harness.close();
   }

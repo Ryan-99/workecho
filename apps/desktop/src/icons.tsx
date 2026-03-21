@@ -166,3 +166,13 @@ export function RefreshIcon() {
     </Icon>
   );
 }
+
+export function WorktreeIcon() {
+  return (
+    <Icon>
+      <path d="M6 5.3h8.1v8.1" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.45" />
+      <path d="M13.9 5.45 5.9 13.45" stroke="currentColor" strokeLinecap="round" strokeWidth="1.45" />
+      <path d="M5.85 9.75v3.95h3.95" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.45" />
+    </Icon>
+  );
+}

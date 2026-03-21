@@ -8,7 +8,7 @@ import {
   type WorktreeRecord,
   type WorkspaceRecord,
 } from "./desktop-state";
-import { ArchiveIcon, ChevronDownIcon, FolderIcon, PlusIcon, RestoreIcon, SettingsIcon, SkillIcon } from "./icons";
+import { ArchiveIcon, ChevronDownIcon, FolderIcon, PlusIcon, RestoreIcon, SettingsIcon, SkillIcon, WorktreeIcon } from "./icons";
 import { ComposerPanel } from "./composer-panel";
 import {
   buildModelOptions,
@@ -1514,16 +1514,14 @@ function ThreadSessionRow({
             <span className="session-row__title">{thread.session.title}</span>
           </span>
           {thread.session.preview ? <span className="session-row__preview">{thread.session.preview}</span> : null}
-          <span className={`session-row__environment session-row__environment--${thread.environment.kind}`}>
-            {thread.environment.kind === "local"
-              ? "Local"
-              : thread.environment.branchName
-                ? `Worktree · ${thread.environment.branchName}`
-                : "Worktree · Detached"}
-          </span>
         </span>
       </button>
       <span className="session-row__trailing">
+        {thread.environment.kind === "worktree" ? (
+          <span className="session-row__workspace-icon" aria-hidden="true" title="Worktree">
+            <WorktreeIcon />
+          </span>
+        ) : null}
         <span className="session-row__time">{formatRelativeTime(thread.session.updatedAt)}</span>
         <button
           aria-label={`${archived ? "Restore" : "Archive"} ${thread.session.title}`}
