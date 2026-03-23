@@ -16,6 +16,23 @@ export function PlusIcon() {
   );
 }
 
+export function ArrowUpIcon() {
+  return (
+    <Icon>
+      <path d="M10 15.2V4.8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      <path d="M5.8 9 10 4.8 14.2 9" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </Icon>
+  );
+}
+
+export function StopSquareIcon() {
+  return (
+    <Icon>
+      <rect x="5.2" y="5.2" width="9.6" height="9.6" rx="1.6" fill="currentColor" />
+    </Icon>
+  );
+}
+
 export function FolderIcon() {
   return (
     <Icon>

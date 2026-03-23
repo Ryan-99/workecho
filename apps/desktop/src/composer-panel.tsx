@@ -1,6 +1,6 @@
 import { type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from "react";
 import type { ComposerImageAttachment, SessionRecord } from "./desktop-state";
-import { ModelIcon, PlusIcon, ReasoningIcon, SkillIcon, SparkIcon, StatusIcon } from "./icons";
+import { ArrowUpIcon, ModelIcon, PlusIcon, ReasoningIcon, SkillIcon, SparkIcon, StatusIcon, StopSquareIcon } from "./icons";
 import type { ComposerSlashCommand, ComposerSlashCommandSection, ComposerSlashOption } from "./composer-commands";
 
 interface ComposerPanelProps {
@@ -197,13 +197,14 @@ export function ComposerPanel({
                 <PlusIcon />
               </button>
               <button
+                aria-label={selectedSession.status === "running" ? "Stop run" : "Send message"}
                 className="button button--primary"
                 data-testid="send"
                 type="button"
                 disabled={!composerDraft.trim() && attachments.length === 0 && selectedSession.status !== "running"}
                 onClick={onSubmit}
               >
-                {selectedSession.status === "running" ? "Stop" : "Send"}
+                {selectedSession.status === "running" ? <StopSquareIcon /> : <ArrowUpIcon />}
               </button>
             </div>
           </div>

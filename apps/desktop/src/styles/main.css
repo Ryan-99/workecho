@@ -517,6 +517,19 @@
   background: #f6f7fb;
 }
 
+.composer [data-testid="send"] {
+  width: 64px;
+  min-width: 64px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
+.composer [data-testid="send"] svg {
+  width: 18px;
+  height: 18px;
+}
+
 .composer__attachments {
   display: flex;
   flex-wrap: wrap;
