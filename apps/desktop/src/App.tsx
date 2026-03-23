@@ -19,6 +19,7 @@ import {
   type ComposerSlashCommand,
   type ComposerSlashOption,
 } from "./composer-commands";
+import { desktopCommands, getDesktopCommandFromShortcut, type PiDesktopCommand } from "./ipc";
 import { SkillsView } from "./skills-view";
 import { SettingsView, type SettingsSection } from "./settings-view";
 import { TimelineItem } from "./timeline-item";
@@ -160,6 +161,7 @@ export default function App() {
   const timelinePaneRef = useRef<HTMLDivElement | null>(null);
   const lastTranscriptMarkerRef = useRef("");
   const pinnedToBottomRef = useRef(true);
+  const previousActiveViewRef = useRef<AppView | null>(null);
   const workspaceMenuWrapRef = useRef<HTMLSpanElement | null>(null);
   const workspaceRenamePanelRef = useRef<HTMLFormElement | null>(null);
   const workspaceRenameInputRef = useRef<HTMLInputElement | null>(null);
@@ -286,15 +288,31 @@ export default function App() {
   }, [rootWorkspaceOptions]);
 
   useEffect(() => {
-    const handler = (event: globalThis.KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
-        event.preventDefault();
+    const handleCommand = (command: PiDesktopCommand) => {
+      if (command === desktopCommands.openSettings) {
         openSettings(selectedWorkspace?.rootWorkspaceId ?? selectedWorkspace?.id);
+      } else if (command === desktopCommands.openNewThread) {
+        openNewThreadSurface(selectedWorkspace?.rootWorkspaceId ?? selectedWorkspace?.id);
       }
     };
-    window.addEventListener("keydown", handler);
+
+    const removeCommandListener = window.piApp?.onCommand?.(handleCommand);
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      const command = getDesktopCommandFromShortcut({
+        modifier: event.metaKey || event.ctrlKey,
+        shift: event.shiftKey,
+        key: event.key,
+        code: event.code,
+      });
+      if (command) {
+        event.preventDefault();
+        handleCommand(command);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener("keydown", handler);
+      removeCommandListener?.();
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [selectedWorkspace?.id, selectedWorkspace?.rootWorkspaceId]);
 
@@ -332,6 +350,22 @@ export default function App() {
     setSlashOptionIndex(0);
     setSlashMenuSuppressedDraft("");
   }, [selectedSessionKey]);
+
+  useEffect(() => {
+    if (!snapshot) {
+      return;
+    }
+
+    if (
+      snapshot.activeView === "threads" &&
+      previousActiveViewRef.current !== "threads" &&
+      selectedSession
+    ) {
+      focusComposer();
+    }
+
+    previousActiveViewRef.current = snapshot.activeView;
+  }, [selectedSession, snapshot]);
 
   useEffect(() => {
     if (!workspaceRenameId) {
@@ -644,6 +678,12 @@ export default function App() {
     void updateSnapshot(api, setSnapshot, () => api.archiveSession(target));
   };
 
+  const handleSelectSession = (target: { workspaceId: string; sessionId: string }) => {
+    void updateSnapshot(api, setSnapshot, () => api.selectSession(target)).then(() => {
+      focusComposer();
+    });
+  };
+
   const handleUnarchiveSession = (target: { workspaceId: string; sessionId: string }) => {
     void updateSnapshot(api, setSnapshot, () => api.unarchiveSession(target));
   };
@@ -913,6 +953,7 @@ export default function App() {
         navItems={settingsNav}
         onBack={() => setActiveView("threads")}
         onSelectNav={(section) => setSettingsSection(section as SettingsSection)}
+        testId="settings-surface"
         title="Settings"
       >
         {settingsSection === "providers" || settingsSection === "models" ? (
@@ -952,7 +993,7 @@ export default function App() {
 
   if (snapshot.activeView === "skills") {
     return (
-      <SecondarySurface onBack={() => setActiveView("threads")} title="Skills">
+      <SecondarySurface onBack={() => setActiveView("threads")} testId="skills-surface" title="Skills">
         <div className="surface-toolbar">
           <label className="surface-toolbar__field">
             <span>Workspace</span>
@@ -1206,11 +1247,7 @@ export default function App() {
                                 sessionId: thread.session.id,
                               })
                             }
-                            onSelect={() => {
-                              void updateSnapshot(api, setSnapshot, () =>
-                                api.selectSession({ workspaceId: thread.workspaceId, sessionId: thread.session.id }),
-                              );
-                            }}
+                            onSelect={() => handleSelectSession({ workspaceId: thread.workspaceId, sessionId: thread.session.id })}
                           />
                         );
                       })}
@@ -1249,11 +1286,7 @@ export default function App() {
                                       sessionId: thread.session.id,
                                     })
                                   }
-                                  onSelect={() => {
-                                    void updateSnapshot(api, setSnapshot, () =>
-                                      api.selectSession({ workspaceId: thread.workspaceId, sessionId: thread.session.id }),
-                                    );
-                                  }}
+                                  onSelect={() => handleSelectSession({ workspaceId: thread.workspaceId, sessionId: thread.session.id })}
                                 />
                               );
                             })}

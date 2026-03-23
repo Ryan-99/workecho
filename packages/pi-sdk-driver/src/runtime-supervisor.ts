@@ -1,13 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, relative, resolve } from "node:path";
 import {
-  AuthStorage,
   DefaultPackageManager,
   DefaultResourceLoader,
-  ModelRegistry,
   type PackageSource,
   SettingsManager,
-  getAgentDir,
   parseFrontmatter,
   stripFrontmatter,
   type PathMetadata,
@@ -23,6 +20,8 @@ import type {
   RuntimeSnapshot,
 } from "@pi-app/session-driver/runtime-types";
 import type { WorkspaceRef } from "@pi-app/session-driver";
+import { createRuntimeDependencies } from "./runtime-deps.js";
+import type { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
 
 interface RuntimeContext {
   readonly workspace: WorkspaceRef;
@@ -46,9 +45,10 @@ export class RuntimeSupervisor implements RuntimeResourceDriver {
   private readonly contexts = new Map<string, RuntimeContext>();
 
   constructor(options: RuntimeSupervisorOptions = {}) {
-    this.agentDir = resolve(options.agentDir ?? getAgentDir());
-    this.authStorage = options.authStorage ?? AuthStorage.create(join(this.agentDir, "auth.json"));
-    this.modelRegistry = options.modelRegistry ?? new ModelRegistry(this.authStorage, join(this.agentDir, "models.json"));
+    const deps = createRuntimeDependencies(options);
+    this.agentDir = deps.agentDir;
+    this.authStorage = deps.authStorage;
+    this.modelRegistry = deps.modelRegistry;
   }
 
   async getRuntimeSnapshot(workspace: WorkspaceRef): Promise<RuntimeSnapshot> {

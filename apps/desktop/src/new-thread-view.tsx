@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import type { RuntimeSnapshot } from "@pi-app/session-driver/runtime-types";
 import type { NewThreadEnvironment, WorkspaceRecord } from "./desktop-state";
 import { ModelIcon, PlusIcon, ReasoningIcon } from "./icons";
@@ -26,6 +26,7 @@ export function NewThreadView({
   onSelectWorkspace,
   onSubmit,
 }: NewThreadViewProps) {
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const workspace = workspaces.find((entry) => entry.id === selectedWorkspaceId) ?? workspaces[0];
   const modelLabel = runtime?.settings.defaultProvider && runtime?.settings.defaultModelId
     ? `${runtime.settings.defaultProvider}:${runtime.settings.defaultModelId}`
@@ -42,6 +43,10 @@ export function NewThreadView({
     event.preventDefault();
     onSubmit();
   };
+
+  useEffect(() => {
+    composerRef.current?.focus();
+  }, []);
 
   if (!workspace) {
     return (
@@ -82,6 +87,7 @@ export function NewThreadView({
             aria-label="New thread prompt"
             className="new-thread__textarea"
             data-testid="new-thread-composer"
+            ref={composerRef}
             placeholder="Ask pi anything, use / for commands, or $ for skills"
             value={prompt}
             onChange={(event) => onChangePrompt(event.target.value)}

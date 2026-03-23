@@ -105,6 +105,14 @@ test("runs two sessions in parallel without sidebar status bleed", async () => {
       "data-sidebar-indicator",
       "running",
     );
+    await expect(window.locator(`.session-row[data-session-id="${sessions.sessionAId}"] .session-row__status--running`)).toHaveCount(1);
+    const runningAlignedTitles = await Promise.all([
+      window.locator(`.session-row[data-session-id="${sessions.sessionAId}"] .session-row__title`).boundingBox(),
+      window.locator(`.session-row[data-session-id="${sessions.sessionBId}"] .session-row__title`).boundingBox(),
+    ]);
+    expect(runningAlignedTitles[0]).not.toBeNull();
+    expect(runningAlignedTitles[1]).not.toBeNull();
+    expect(Math.abs((runningAlignedTitles[0]?.x ?? 0) - (runningAlignedTitles[1]?.x ?? 0))).toBeLessThanOrEqual(1);
 
     await expect
       .poll(async () => {
@@ -126,6 +134,7 @@ test("runs two sessions in parallel without sidebar status bleed", async () => {
       "data-sidebar-indicator",
       "unseen",
     );
+    await expect(window.locator(`.session-row[data-session-id="${sessions.sessionAId}"] .session-row__status--unseen`)).toHaveCount(1);
     await expect(window.locator(`.session-row[data-session-id="${sessions.sessionBId}"]`)).toHaveAttribute(
       "data-sidebar-indicator",
       "none",
@@ -141,6 +150,7 @@ test("runs two sessions in parallel without sidebar status bleed", async () => {
 
     await window.locator(`.session-row[data-session-id="${sessions.sessionAId}"] .session-row__select`).click();
     await expect(window.locator(".topbar__session")).toHaveText("Session A");
+    await expect(window.getByTestId("composer")).toBeFocused();
     await expect(window.locator(`.session-row[data-session-id="${sessions.sessionAId}"]`)).toHaveAttribute(
       "data-sidebar-indicator",
       "none",

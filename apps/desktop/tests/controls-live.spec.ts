@@ -28,6 +28,28 @@ test("supports slash commands plus image draft preview and removal", async () =>
     await expect(window.locator(".topbar__session")).toHaveText("Controls session");
 
     const composer = window.getByTestId("composer");
+    await window.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, bubbles: true }));
+    });
+    await expect.poll(async () => (await getDesktopState(window)).activeView).toBe("settings");
+    await expect(window.getByTestId("settings-surface")).toBeVisible();
+    await expect(window.locator(".view-header__title")).toContainText("General");
+
+    await window.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "O", metaKey: true, shiftKey: true, bubbles: true }));
+    });
+    await expect.poll(async () => (await getDesktopState(window)).activeView).toBe("new-thread");
+    await expect(window.locator(".new-thread")).toBeVisible();
+    await expect(window.getByTestId("new-thread-composer")).toBeFocused();
+
+    await window.evaluate(async () => {
+      const app = (window as PiAppWindow).piApp;
+      if (!app) throw new Error("piApp unavailable");
+      await app.setActiveView("threads");
+    });
+    await expect(window.locator(".topbar__session")).toHaveText("Controls session");
+    await expect(composer).toBeFocused();
+
     await composer.fill("/st");
     const slashMenu = window.getByTestId("slash-menu");
     await expect(slashMenu).toBeVisible();

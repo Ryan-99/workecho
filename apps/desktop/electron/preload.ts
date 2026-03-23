@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { desktopIpc } from "../src/ipc";
+import { desktopIpc, type PiDesktopCommand } from "../src/ipc";
 import type { RuntimeSettingsSnapshot } from "@pi-app/session-driver/runtime-types";
 import type {
   AppView,
@@ -25,6 +25,15 @@ contextBridge.exposeInMainWorld("piApp", {
     ipcRenderer.on(desktopIpc.stateChanged, handle);
     return () => {
       ipcRenderer.removeListener(desktopIpc.stateChanged, handle);
+    };
+  },
+  onCommand: (listener: (command: PiDesktopCommand) => void) => {
+    const handle = (_event: Electron.IpcRendererEvent, command: PiDesktopCommand) => {
+      listener(command);
+    };
+    ipcRenderer.on(desktopIpc.appCommand, handle);
+    return () => {
+      ipcRenderer.removeListener(desktopIpc.appCommand, handle);
     };
   },
   addWorkspacePath: (workspacePath: string) =>

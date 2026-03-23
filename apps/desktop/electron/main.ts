@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { DesktopAppStore } from "./app-store";
 import { NotificationManager } from "./notification-manager";
-import { desktopIpc } from "../src/ipc";
+import { desktopIpc, getDesktopCommandFromShortcut } from "../src/ipc";
 import type {
   ComposerImageAttachment,
   CreateSessionInput,
@@ -48,6 +48,22 @@ function createWindow(): BrowserWindow {
   });
 
   window.once("ready-to-show", () => window.show());
+  window.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") {
+      return;
+    }
+
+    const command = getDesktopCommandFromShortcut({
+      modifier: process.platform === "darwin" ? input.meta : input.control,
+      shift: input.shift,
+      key: input.key,
+      code: input.code,
+    });
+    if (command) {
+      event.preventDefault();
+      window.webContents.send(desktopIpc.appCommand, command);
+    }
+  });
 
   if (isDev) {
     void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);

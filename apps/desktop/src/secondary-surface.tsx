@@ -11,6 +11,7 @@ interface SecondarySurfaceProps {
   readonly navItems?: readonly SecondarySurfaceNavItem[];
   readonly activeNavId?: string;
   readonly onSelectNav?: (id: string) => void;
+  readonly testId?: string;
   readonly children: ReactNode;
 }
 
@@ -20,10 +21,11 @@ export function SecondarySurface({
   navItems = [],
   activeNavId,
   onSelectNav,
+  testId,
   children,
 }: SecondarySurfaceProps) {
   return (
-    <div className="secondary-surface">
+    <div className="secondary-surface" data-testid={testId}>
       <aside className="secondary-surface__sidebar">
         <button className="secondary-surface__back" type="button" onClick={onBack}>
           <span aria-hidden="true">←</span>

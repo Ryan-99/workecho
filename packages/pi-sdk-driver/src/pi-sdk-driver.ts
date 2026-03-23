@@ -17,6 +17,7 @@ import {
   type SyncWorkspaceResult,
 } from "./session-supervisor.js";
 import { RuntimeSupervisor, type RuntimeSupervisorOptions } from "./runtime-supervisor.js";
+import { createRuntimeDependencies } from "./runtime-deps.js";
 
 export interface PiSdkDriverConfig extends PiSdkDriverOptions, RuntimeSupervisorOptions {}
 
@@ -25,8 +26,10 @@ export class PiSdkDriver implements SessionDriver {
   private readonly runtimeSupervisor: RuntimeSupervisor;
 
   constructor(options: PiSdkDriverConfig = {}) {
-    this.supervisor = new SessionSupervisor(options);
-    this.runtimeSupervisor = new RuntimeSupervisor(options);
+    const deps = createRuntimeDependencies(options);
+
+    this.supervisor = new SessionSupervisor({ ...options, modelRegistry: deps.modelRegistry });
+    this.runtimeSupervisor = new RuntimeSupervisor({ ...options, ...deps });
   }
 
   createSession(workspace: WorkspaceRef, options?: CreateSessionOptions): Promise<SessionSnapshot> {

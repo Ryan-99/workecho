@@ -14,6 +14,7 @@ import type {
 export const desktopIpc = {
   stateRequest: "pi-app:state-request",
   stateChanged: "pi-app:state-changed",
+  appCommand: "pi-app:app-command",
   addWorkspacePath: "pi-app:add-workspace-path",
   pickWorkspace: "pi-app:pick-workspace",
   selectWorkspace: "pi-app:select-workspace",
@@ -52,7 +53,40 @@ export const desktopIpc = {
   openExternal: "app:open-external",
 } as const;
 
+export const desktopCommands = {
+  openSettings: "open-settings",
+  openNewThread: "open-new-thread",
+} as const;
+
 export type PiDesktopStateListener = (state: DesktopAppState) => void;
+export type PiDesktopCommand = (typeof desktopCommands)[keyof typeof desktopCommands];
+
+export interface DesktopShortcutInput {
+  readonly modifier: boolean;
+  readonly shift: boolean;
+  readonly key: string;
+  readonly code?: string;
+}
+
+export function getDesktopCommandFromShortcut(input: DesktopShortcutInput): PiDesktopCommand | undefined {
+  if (!input.modifier) {
+    return undefined;
+  }
+
+  const lowerKey = input.key.toLowerCase();
+  const isComma = input.key === "," || input.code === "Comma";
+  const isShiftO = input.shift && (lowerKey === "o" || input.code === "KeyO");
+
+  if (!input.shift && isComma) {
+    return desktopCommands.openSettings;
+  }
+
+  if (isShiftO) {
+    return desktopCommands.openNewThread;
+  }
+
+  return undefined;
+}
 
 export interface PiDesktopApi {
   platform: NodeJS.Platform;
@@ -60,6 +94,7 @@ export interface PiDesktopApi {
   ping(): Promise<string>;
   getState(): Promise<DesktopAppState>;
   onStateChanged(listener: PiDesktopStateListener): () => void;
+  onCommand(listener: (command: PiDesktopCommand) => void): () => void;
   addWorkspacePath(path: string): Promise<DesktopAppState>;
   pickWorkspace(): Promise<DesktopAppState>;
   selectWorkspace(workspaceId: string): Promise<DesktopAppState>;

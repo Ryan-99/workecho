@@ -1,6 +1,7 @@
 import { access, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  ModelRegistry,
   createAgentSession,
   SessionManager,
   type AgentSession,
@@ -46,6 +47,7 @@ import type { SessionTranscriptMessage } from "./transcript.js";
 export interface PiSdkDriverOptions {
   readonly catalogFilePath?: string;
   readonly createAgentSessionImpl?: (options?: CreateAgentSessionOptions) => Promise<{ session: AgentSession }>;
+  readonly modelRegistry?: ModelRegistry;
 }
 
 export interface SyncWorkspaceResult {
@@ -74,6 +76,7 @@ interface ManagedSessionRecord {
 export class SessionSupervisor {
   private readonly catalogs: SessionFileCatalogStorage;
   private readonly createAgentSessionImpl: (options?: CreateAgentSessionOptions) => Promise<{ session: AgentSession }>;
+  private readonly modelRegistry: ModelRegistry | undefined;
   private readonly records = new Map<string, ManagedSessionRecord>();
 
   constructor(options: PiSdkDriverOptions = {}) {
@@ -81,6 +84,7 @@ export class SessionSupervisor {
       ? new JsonCatalogStore({ catalogFilePath: options.catalogFilePath })
       : new JsonCatalogStore();
     this.createAgentSessionImpl = options.createAgentSessionImpl ?? ((createOptions) => createAgentSession(createOptions));
+    this.modelRegistry = options.modelRegistry;
   }
 
   listWorkspaces(): Promise<WorkspaceCatalogSnapshot> {
@@ -207,6 +211,7 @@ export class SessionSupervisor {
     const { session } = await this.createAgentSessionImpl({
       cwd: workspace.path,
       sessionManager: SessionManager.create(workspace.path),
+      ...(this.modelRegistry ? { modelRegistry: this.modelRegistry } : {}),
     });
 
     const record = this.createRecord(workspace, session, options?.title ?? deriveWorkspaceTitle(workspace));
@@ -317,10 +322,13 @@ export class SessionSupervisor {
 
   async setSessionModel(sessionRef: SessionRef, selection: SessionModelSelection): Promise<void> {
     const record = await this.ensureRecord(sessionRef);
-    const sessionManager = this.getWritableSessionManager(record);
-    sessionManager.appendModelChange(selection.provider, selection.modelId);
-    forcePersistSession(sessionManager);
-    record.config = deriveSessionConfig(sessionManager);
+    const session = record.session;
+    if (!session) {
+      throw new Error(`Session ${sessionKey(record.ref)} is not active.`);
+    }
+
+    await session.setModel(this.resolveModel(selection.provider, selection.modelId));
+    record.config = deriveSessionConfig(session.sessionManager);
     record.updatedAt = nowIso();
     await this.persistSnapshot(record);
     await this.emit(record, sessionUpdatedEvent(record));
@@ -454,6 +462,7 @@ export class SessionSupervisor {
     const { session } = await this.createAgentSessionImpl({
       cwd: workspace.path,
       sessionManager: SessionManager.open(sessionFile),
+      ...(this.modelRegistry ? { modelRegistry: this.modelRegistry } : {}),
     });
 
     const record = existing ?? this.createRecord(workspaceToRef(workspace), session, sessionEntry.title);
@@ -512,6 +521,14 @@ export class SessionSupervisor {
       throw new Error(`Session ${sessionKey(record.ref)} is not active.`);
     }
     return sessionManager;
+  }
+
+  private resolveModel(provider: string, modelId: string) {
+    const model = this.modelRegistry?.find(provider, modelId);
+    if (!model) {
+      throw new Error(`Unknown model ${provider}:${modelId}`);
+    }
+    return model;
   }
 
   private async handleAgentEvent(record: ManagedSessionRecord, event: AgentSessionEvent): Promise<void> {

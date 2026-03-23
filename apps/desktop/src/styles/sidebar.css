@@ -363,7 +363,7 @@
 }
 
 .session-list {
-  padding-left: 24px;
+  padding-left: 0;
   display: grid;
   gap: 2px;
 }
@@ -395,18 +395,19 @@
   align-items: center;
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
+  padding-left: 18px;
   text-align: left;
   color: inherit;
   position: relative;
 }
 
 .session-row__leading {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   display: grid;
   place-items: center;
   position: absolute;
-  left: -18px;
+  left: 0;
   top: 50%;
   transform: translateY(-50%);
   pointer-events: none;
@@ -417,12 +418,12 @@
 }
 
 .session-row__status--running {
-  width: 14px;
-  height: 14px;
+  width: 11px;
+  height: 11px;
   border-radius: 999px;
-  border: 2px solid #cfd5e4;
-  border-top-color: #7580a0;
-  border-right-color: #7580a0;
+  border: 2px solid #d6ddf3;
+  border-top-color: #697aff;
+  border-right-color: #697aff;
   animation: session-row-spin 900ms linear infinite;
 }
 
@@ -430,7 +431,7 @@
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: #b4bbc9;
+  background: #4657cf;
 }
 
 .session-row__body {
