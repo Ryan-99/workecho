@@ -2,7 +2,6 @@
 :root {
   --accent: #6a55f2;
   --accent-hover: #5842d9;
-  --accent-glow: rgba(106, 85, 242, 0.06);
   --accent-light: #ece8ff;
   --text: #1f2638;
   --text-secondary: #39435b;
@@ -11,9 +10,7 @@
   --bg: #f8f8fb;
   --border: #e5e7eb;
   --border-strong: #d2d7e2;
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
   --shadow-screenshot: 0 24px 80px rgba(0, 0, 0, 0.1), 0 4px 16px rgba(0, 0, 0, 0.04);
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -183,7 +180,8 @@ video {
   font-weight: 600;
   border: none;
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: background 150ms ease, transform 150ms ease,
+    box-shadow 150ms ease, border-color 150ms ease;
   white-space: nowrap;
 }
 

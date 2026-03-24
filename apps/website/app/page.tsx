@@ -100,13 +100,23 @@ export default function Page() {
                 <span className="screenshot-dot" />
                 <span className="screenshot-dot" />
               </div>
-              <img
-                src="/demo.gif"
-                alt="pi-gui desktop app showing a coding session with sidebar navigation and agent conversation"
+              <video
+                autoPlay
+                loop
+                muted
+                playsInline
                 className="screenshot-img"
                 width={1480}
                 height={980}
-              />
+              >
+                <source src="/demo.mp4" type="video/mp4" />
+                <img
+                  src="/demo.gif"
+                  alt="pi-gui desktop app showing a coding session with sidebar navigation and agent conversation"
+                  width={1480}
+                  height={980}
+                />
+              </video>
             </div>
           </div>
         </section>
@@ -135,7 +145,7 @@ export default function Page() {
             </p>
             <div className="features-grid">
               <div className="feature-card">
-                <div className="feature-icon">&#128194;</div>
+                <div className="feature-icon" aria-hidden="true">&#128194;</div>
                 <h3>Multi-workspace sessions</h3>
                 <p>
                   Open project folders as workspaces, each with independent
@@ -144,7 +154,7 @@ export default function Page() {
                 </p>
               </div>
               <div className="feature-card">
-                <div className="feature-icon">&#9889;</div>
+                <div className="feature-icon" aria-hidden="true">&#9889;</div>
                 <h3>Real-time agent timeline</h3>
                 <p>
                   Watch every tool execution, code change, and reasoning step in
@@ -152,7 +162,7 @@ export default function Page() {
                 </p>
               </div>
               <div className="feature-card">
-                <div className="feature-icon">&#128340;</div>
+                <div className="feature-icon" aria-hidden="true">&#128340;</div>
                 <h3>Persistent session history</h3>
                 <p>
                   Sessions survive restarts. Resume any previous conversation,
@@ -160,7 +170,7 @@ export default function Page() {
                 </p>
               </div>
               <div className="feature-card">
-                <div className="feature-icon">&#128295;</div>
+                <div className="feature-icon" aria-hidden="true">&#128295;</div>
                 <h3>Skills &amp; slash commands</h3>
                 <p>
                   Extend pi-gui with workspace-specific skills and slash
