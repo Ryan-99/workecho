@@ -9,6 +9,39 @@ function GitHubIcon() {
   );
 }
 
+function FolderIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+    </svg>
+  );
+}
+
+function BoltIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+function WrenchIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
+    </svg>
+  );
+}
+
 function ArrowIcon() {
   return (
     <svg
@@ -145,7 +178,7 @@ export default function Page() {
             </p>
             <div className="features-grid">
               <div className="feature-card">
-                <div className="feature-icon" aria-hidden="true">&#128194;</div>
+                <div className="feature-icon" aria-hidden="true"><FolderIcon /></div>
                 <h3>Multi-workspace sessions</h3>
                 <p>
                   Open project folders as workspaces, each with independent
@@ -154,7 +187,7 @@ export default function Page() {
                 </p>
               </div>
               <div className="feature-card">
-                <div className="feature-icon" aria-hidden="true">&#9889;</div>
+                <div className="feature-icon" aria-hidden="true"><BoltIcon /></div>
                 <h3>Real-time agent timeline</h3>
                 <p>
                   Watch every tool execution, code change, and reasoning step in
@@ -162,7 +195,7 @@ export default function Page() {
                 </p>
               </div>
               <div className="feature-card">
-                <div className="feature-icon" aria-hidden="true">&#128340;</div>
+                <div className="feature-icon" aria-hidden="true"><ClockIcon /></div>
                 <h3>Persistent session history</h3>
                 <p>
                   Sessions survive restarts. Resume any previous conversation,
@@ -170,7 +203,7 @@ export default function Page() {
                 </p>
               </div>
               <div className="feature-card">
-                <div className="feature-icon" aria-hidden="true">&#128295;</div>
+                <div className="feature-icon" aria-hidden="true"><WrenchIcon /></div>
                 <h3>Skills &amp; slash commands</h3>
                 <p>
                   Extend pi-gui with workspace-specific skills and slash
