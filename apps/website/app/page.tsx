@@ -1,4 +1,4 @@
-const GITHUB_URL = "https://github.com/minghinmatthewlam/pi-app";
+const GITHUB_URL = "https://github.com/minghinmatthewlam/pi-gui";
 const PI_MONO_URL = "https://github.com/mariozechner/pi";
 
 function GitHubIcon() {
@@ -65,7 +65,7 @@ export default function Page() {
       {/* ===== Nav ===== */}
       <nav className="nav">
         <div className="nav-inner">
-          <span className="nav-logo">pi-app</span>
+          <span className="nav-logo">pi-gui</span>
           <div className="nav-links">
             <a href="#features" className="nav-link">
               Features
@@ -99,7 +99,7 @@ export default function Page() {
               AI coding agents
             </h1>
             <p className="hero-subtitle">
-              pi-app is a Codex-style macOS desktop app for the{" "}
+              pi-gui is a Codex-style macOS desktop app for the{" "}
               <a
                 href={PI_MONO_URL}
                 target="_blank"
@@ -145,7 +145,7 @@ export default function Page() {
                 <source src="/demo.mp4" type="video/mp4" />
                 <img
                   src="/demo.gif"
-                  alt="pi-app desktop app showing a coding session with sidebar navigation and agent conversation"
+                  alt="pi-gui desktop app showing a coding session with sidebar navigation and agent conversation"
                   width={1480}
                   height={980}
                 />
@@ -158,7 +158,7 @@ export default function Page() {
         <section className="value-prop">
           <div className="container container--narrow">
             <p>
-              From quick fixes to complex refactors, pi-app gives you a
+              From quick fixes to complex refactors, pi-gui gives you a
               persistent desktop workspace for AI-powered coding sessions —
               with full visibility into what the agent is doing and why.
             </p>
@@ -206,7 +206,7 @@ export default function Page() {
                 <div className="feature-icon" aria-hidden="true"><WrenchIcon /></div>
                 <h3>Skills &amp; slash commands</h3>
                 <p>
-                  Extend pi-app with workspace-specific skills and slash
+                  Extend pi-gui with workspace-specific skills and slash
                   commands for model switching, thinking levels, settings, and
                   custom workflows.
                 </p>
@@ -278,7 +278,7 @@ export default function Page() {
                 {"\n"}
                 <span className="code-command">git clone</span>{" "}
                 {GITHUB_URL}.git{"\n"}
-                <span className="code-command">cd</span> pi-app{"\n\n"}
+                <span className="code-command">cd</span> pi-gui{"\n\n"}
                 <span className="code-comment">
                   # Install dependencies and run
                 </span>
@@ -305,7 +305,7 @@ export default function Page() {
       {/* ===== Footer ===== */}
       <footer className="footer">
         <div className="footer-inner">
-          <span>pi-app</span>
+          <span>pi-gui</span>
           <span className="footer-sep">&middot;</span>
           <span>MIT License</span>
           <span className="footer-sep">&middot;</span>
