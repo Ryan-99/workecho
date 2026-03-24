@@ -1,0 +1,261 @@
+const GITHUB_URL = "https://github.com/minghinmatthewlam/pi-app";
+
+function GitHubIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+    </svg>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 13L13 3M13 3H6M13 3v7" />
+    </svg>
+  );
+}
+
+export default function Page() {
+  return (
+    <>
+      {/* ===== Nav ===== */}
+      <nav className="nav">
+        <div className="nav-inner">
+          <span className="nav-logo">pi</span>
+          <div className="nav-links">
+            <a href="#features" className="nav-link">
+              Features
+            </a>
+            <a href="#architecture" className="nav-link">
+              Architecture
+            </a>
+            <a
+              href={GITHUB_URL}
+              className="nav-link nav-link--github"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <GitHubIcon />
+              GitHub
+            </a>
+          </div>
+        </div>
+      </nav>
+
+      <main>
+        {/* ===== Hero ===== */}
+        <section className="hero">
+          <div className="container">
+            <div className="hero-mark" aria-hidden="true">
+              &pi;
+            </div>
+            <h1 className="hero-heading">
+              A native desktop for
+              <br />
+              AI coding agents
+            </h1>
+            <p className="hero-subtitle">
+              pi is a Codex-style macOS desktop app for the pi coding agent.
+              Manage workspaces, run sessions, and review agent work — all from
+              a native interface.
+            </p>
+            <div className="hero-ctas">
+              <a
+                href={GITHUB_URL}
+                className="btn btn-primary btn-github"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <GitHubIcon />
+                View on GitHub
+              </a>
+              <a href="#get-started" className="btn btn-secondary">
+                Get started
+              </a>
+            </div>
+          </div>
+          <div className="screenshot-wrapper">
+            <div className="screenshot-frame">
+              <div className="screenshot-titlebar">
+                <span className="screenshot-dot" />
+                <span className="screenshot-dot" />
+                <span className="screenshot-dot" />
+              </div>
+              <img
+                src="/demo-poster.png"
+                alt="pi desktop app showing a coding session with sidebar navigation and agent conversation"
+                className="screenshot-img"
+                width={1480}
+                height={980}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* ===== Value Prop ===== */}
+        <section className="value-prop">
+          <div className="container container--narrow">
+            <p>
+              From quick fixes to complex refactors, pi gives you a persistent
+              desktop workspace for AI-powered coding sessions — with full
+              visibility into what the agent is doing and why.
+            </p>
+          </div>
+        </section>
+
+        {/* ===== Features ===== */}
+        <section id="features" className="features">
+          <div className="container">
+            <p className="section-eyebrow">Features</p>
+            <h2 className="section-heading">
+              Everything you need in one window
+            </h2>
+            <p className="section-subtitle">
+              A desktop-native experience built for multi-project AI coding
+              workflows.
+            </p>
+            <div className="features-grid">
+              <div className="feature-card">
+                <div className="feature-icon">&#128194;</div>
+                <h3>Multi-workspace sessions</h3>
+                <p>
+                  Open project folders as workspaces, each with independent
+                  session histories. Context-switch between projects without
+                  losing state.
+                </p>
+              </div>
+              <div className="feature-card">
+                <div className="feature-icon">&#9889;</div>
+                <h3>Real-time agent timeline</h3>
+                <p>
+                  Watch every tool execution, code change, and reasoning step in
+                  a scrollable timeline with full input and output detail.
+                </p>
+              </div>
+              <div className="feature-card">
+                <div className="feature-icon">&#128340;</div>
+                <h3>Persistent session history</h3>
+                <p>
+                  Sessions survive restarts. Resume any previous conversation,
+                  review transcripts, and continue exactly where you left off.
+                </p>
+              </div>
+              <div className="feature-card">
+                <div className="feature-icon">&#128295;</div>
+                <h3>Skills &amp; slash commands</h3>
+                <p>
+                  Extend pi with workspace-specific skills and slash commands for
+                  model switching, thinking levels, settings, and custom
+                  workflows.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ===== Architecture ===== */}
+        <section id="architecture" className="architecture">
+          <div className="container">
+            <p className="section-eyebrow">Architecture</p>
+            <h2 className="section-heading">Built for durability</h2>
+            <p className="architecture-desc">
+              The desktop shell is separated from the agent runtime through a
+              durable SessionDriver interface — making the frontend independent
+              of backend changes and ready for future runtime swaps.
+            </p>
+            <div className="tech-stack">
+              <span className="tech-chip">Electron 34</span>
+              <span className="tech-chip">React 19</span>
+              <span className="tech-chip">TypeScript</span>
+              <span className="tech-chip">Vite</span>
+              <span className="tech-chip">pi-coding-agent</span>
+            </div>
+            <div className="diagram">
+              <div className="diagram-row">
+                <span className="diagram-label">Renderer</span>
+                <span className="diagram-arrow">&rarr;</span>
+                React UI &middot; Session views &middot; Composer
+              </div>
+              <div className="diagram-row">
+                <span className="diagram-label">Preload</span>
+                <span className="diagram-arrow">&rarr;</span>
+                Secure IPC bridge
+              </div>
+              <div className="diagram-row">
+                <span className="diagram-label">Main</span>
+                <span className="diagram-arrow">&rarr;</span>
+                SessionDriver &middot; Catalogs &middot; Persistence
+              </div>
+              <div className="diagram-row">
+                <span className="diagram-label">Runtime</span>
+                <span className="diagram-arrow">&rarr;</span>
+                pi-coding-agent &middot; Model providers
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ===== Get Started ===== */}
+        <section id="get-started" className="get-started">
+          <div className="container">
+            <p className="section-eyebrow">Get started</p>
+            <h2 className="section-heading">Up and running in minutes</h2>
+            <div className="code-block">
+              <code>
+                <span className="code-comment"># Clone the repo</span>
+                {"\n"}
+                <span className="code-command">git clone</span>{" "}
+                {GITHUB_URL}.git{"\n"}
+                <span className="code-command">cd</span> pi-app{"\n\n"}
+                <span className="code-comment">
+                  # Install dependencies and run
+                </span>
+                {"\n"}
+                <span className="code-command">pnpm install</span>
+                {"\n"}
+                <span className="code-command">pnpm dev</span>
+              </code>
+            </div>
+            <a
+              href={GITHUB_URL}
+              className="btn btn-primary btn-github"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <GitHubIcon />
+              View on GitHub
+              <ArrowIcon />
+            </a>
+          </div>
+        </section>
+      </main>
+
+      {/* ===== Footer ===== */}
+      <footer className="footer">
+        <div className="footer-inner">
+          <span>pi</span>
+          <span className="footer-sep">&middot;</span>
+          <span>MIT License</span>
+          <span className="footer-sep">&middot;</span>
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub
+          </a>
+        </div>
+      </footer>
+    </>
+  );
+}
