@@ -9,6 +9,7 @@
  * 策略引擎（isDangerousOp/shouldPersistResult/auditToolCall）可独立测试。
  * createPolicyExtension 返回 ExtensionFactory，注册 pi 事件钩子。
  */
+import path from "node:path";
 import { PI_EVENTS, type ExtensionFactory } from "./pi-compat";
 import { appendToLog } from "./wiki-manager";
 import { getActiveWikiConfig } from "./wiki-config";
@@ -34,6 +35,35 @@ export const PipelineDecision = {
 
 /** 需要确认的危险实体类型（修改这些类型的数据需要用户确认） */
 const DANGEROUS_ENTITY_TYPES = new Set(["okr", "maintenance"]);
+
+/** pi 上游的文件写入类工具（写这些工具的 path 参数才做受保护路径检查） */
+const WRITE_FILE_TOOLS = new Set(["write", "edit", "edit-diff"]);
+
+/**
+ * 受保护配置文件判定（HK-1/F-06/F-34）：Agent 的文件工具改写这些文件
+ * 等于修改自身的安全管控（Hook 规则 / 系统提示词 / MCP 命令清单），
+ * 命中即走危险确认（复用 isDangerousOp 的确认与 fail-closed 流程）。
+ */
+export function isProtectedConfigPath(params: Record<string, unknown>, cwd: string): boolean {
+  const workspaceTargets = [
+    path.resolve(cwd, "workbench/wiki/hooks.md"),
+    path.resolve(cwd, "AGENTS.md"),
+  ];
+  const check = (v: unknown): boolean => {
+    if (typeof v !== "string" || !v) return false;
+    const resolved = path.resolve(cwd, v);
+    if (workspaceTargets.includes(resolved)) return true;
+    const normalized = resolved.split(path.sep).join("/").toLowerCase();
+    return normalized.endsWith(".pi/agent/mcp-servers.json");
+  };
+  const scan = (v: unknown): boolean => {
+    if (typeof v === "string") return check(v);
+    if (Array.isArray(v)) return v.some(scan);
+    if (v && typeof v === "object") return Object.values(v).some(scan);
+    return false;
+  };
+  return Object.values(params ?? {}).some(scan);
+}
 
 /** 查询类工具（只读，不修改数据，结果不自动存） */
 const READONLY_TOOLS = new Set([
@@ -145,6 +175,15 @@ export function preExecute(
       decision: PipelineDecision.PASS,
       dangerous: true,
       dangerousDescription: `即将修改关键数据：${toolName}${type ? `（${type}）` : ""}。确认执行？`,
+    };
+  }
+
+  // 受保护配置文件写入（HK-1/F-06）：文件工具改写管控配置 = 自我松绑
+  if (WRITE_FILE_TOOLS.has(toolName) && isProtectedConfigPath(params, workspaceDir)) {
+    return {
+      decision: PipelineDecision.PASS,
+      dangerous: true,
+      dangerousDescription: "Agent 正在写入受保护配置文件（hooks.md / AGENTS.md / mcp-servers.json）。这类文件控制安全策略，确认允许修改？",
     };
   }
 

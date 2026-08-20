@@ -711,9 +711,10 @@ function SkillsTab() {
     setImporting(true); setResult(null);
     try {
       const api = window as any;
-      const dir = await api.piApp.pickDirectory?.();
-      if (!dir) { setImporting(false); return; } // 用户取消
-      const r = await api.piApp.importSkill?.(dir);
+      const token = await api.piApp.pickDirectory?.();
+      if (!token) { setImporting(false); return; } // 用户取消
+      // token 是一次性目录令牌（主进程签发），非裸路径
+      const r = await api.piApp.importSkill?.(token);
       setResult(r);
       if (r?.imported) setRefreshKey((k) => k + 1);
     } catch (e) {

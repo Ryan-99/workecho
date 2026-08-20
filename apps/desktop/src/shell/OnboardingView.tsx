@@ -85,7 +85,7 @@ export function OnboardingView({ defaultPath, onPickWorkspace, onConfirmWorkspac
         {step === 2 && (
           <div className="onboarding-step">
             <p className="onboarding-desc">
-              工作目录已就绪。要不要扫描你电脑上的文档（桌面/文档/下载 + 其他盘），
+              工作目录已就绪。要不要扫描你电脑上的文档（桌面/文档 + 其他目录），
               自动分类导入知识库？
             </p>
             <p className="onboarding-hint">

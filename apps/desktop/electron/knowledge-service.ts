@@ -34,13 +34,14 @@ const SKIP_PATH_PARTS = [
   "/.ssh/", "/.aws/", "/.gnupg/", "/.kube/", "/.docker/",
 ];
 
-/** 获取用户常用文档目录（桌面/文档/下载），自动适配 Win/Mac/Linux。
- * 注意：不扫盘符根目录——整盘递归会捞进大量备份/缓存垃圾（曾把 logseq 的
+/** 获取用户常用文档目录（桌面/文档），自动适配 Win/Mac/Linux。
+ * 下载目录是典型不可信输入源（恶意文档 → 全文入库 → 二阶注入，安全审核 F-22），
+ * 已从默认扫描移除；用户仍可通过 init_scan 显式指定（会弹安全确认）。 * 注意：不扫盘符根目录——整盘递归会捞进大量备份/缓存垃圾（曾把 logseq 的
  * bak/journals 一口气导入 7000+ 空页）。要扫其他目录让用户通过 scanDir 显式指定。 */
 export function getCommonDocDirs(): string[] {
   const home = os.homedir();
   const dirs: string[] = [];
-  for (const d of ["Desktop", "Documents", "Downloads"]) {
+  for (const d of ["Desktop", "Documents"]) {
     const p = path.join(home, d);
     if (existsSync(p)) dirs.push(p);
   }

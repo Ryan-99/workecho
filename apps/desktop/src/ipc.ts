@@ -435,6 +435,7 @@ export interface PiDesktopApi {
   checkUpdate(): Promise<unknown>;
   openReleases(url?: string): Promise<void>;
   openDir(dirPath: string): Promise<unknown>;
+  /** 返回一次性目录令牌（10 分钟有效、用后即焚），不是裸路径 */
   pickDirectory(): Promise<string | null>;
   compactSession(): Promise<DesktopAppState | null>;
   generateSessionTitle(workspaceId: string, sessionId: string): Promise<DesktopAppState | null>;
@@ -469,7 +470,7 @@ export interface PiDesktopApi {
   createPlugin(name: string, code: string): Promise<unknown>;
   removePlugin(name: string): Promise<unknown>;
   createSkill(name: string, description: string, content: string): Promise<unknown>;
-  importSkill(sourceDir: string): Promise<unknown>;
+  importSkill(token: string): Promise<unknown>;
   saveMcpConfig(servers: Record<string, unknown>): Promise<unknown>;
   listHooks(): Promise<unknown>;
   addHook(input: Record<string, unknown>): Promise<unknown>;

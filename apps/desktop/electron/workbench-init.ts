@@ -59,7 +59,7 @@ export function initWorkspaceDir(workspaceDir: string): void {
 }
 
 /**
- * 初始化文档扫描：自动扫描用户电脑常用目录（桌面/文档/下载 + 额外盘），
+ * 初始化文档扫描：自动扫描用户电脑常用目录（桌面/文档 + 额外目录），
  * 把 .md/.txt 文档分类后全量导入知识库。
  *
  * 幂等：有 .init-scan-done 标记则跳过。

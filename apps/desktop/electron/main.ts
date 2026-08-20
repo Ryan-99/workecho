@@ -2389,15 +2389,37 @@ app.whenReady().then(async () => {
   });
 
   // ── Skill 导入（设置页：技能包 = 含 SKILL.md 的目录） ──
+  // SK-1/F-32：pick-directory 返回一次性令牌而非裸路径——被入侵的渲染层
+  // 无法用任意路径（网络盘/临时目录投放的"技能包"）静默安装实现持久化注入。
+  // 令牌 10 分钟有效、用后即焚，只有真正经过系统对话框选择的目录能被导入。
+  const directoryTokens = new Map<string, { dir: string; expiresAt: number }>();
+  const DIRECTORY_TOKEN_TTL_MS = 10 * 60_000;
+  const issueDirectoryToken = (dir: string): string => {
+    const now = Date.now();
+    for (const [t, e] of directoryTokens) {
+      if (e.expiresAt < now) directoryTokens.delete(t);
+    }
+    const token = randomUUID();
+    directoryTokens.set(token, { dir, expiresAt: now + DIRECTORY_TOKEN_TTL_MS });
+    return token;
+  };
+  const consumeDirectoryToken = (token: string): string | null => {
+    const entry = directoryTokens.get(token);
+    directoryTokens.delete(token); // 用后即焚
+    if (!entry || entry.expiresAt < Date.now()) return null;
+    return entry.dir;
+  };
   ipcMain.handle("workbench:pick-directory", async () => {
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: "选择要导入的 Skill 目录（需包含 SKILL.md）",
       properties: ["openDirectory"],
     });
-    return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]!;
+    return r.canceled || r.filePaths.length === 0 ? null : issueDirectoryToken(r.filePaths[0]!);
   });
-  ipcMain.handle("workbench:import-skill", async (_event, sourceDir: string) => {
+  ipcMain.handle("workbench:import-skill", async (_event, token: string) => {
     try {
+      const sourceDir = consumeDirectoryToken(String(token ?? ""));
+      if (!sourceDir) return { imported: false, reason: "目录令牌无效或已过期，请重新选择目录" };
       const result = importSkill(userSkillsRoot(), sourceDir);
       if (!result.imported) return result;
       const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
