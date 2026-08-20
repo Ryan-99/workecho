@@ -274,7 +274,18 @@ export async function submitComposer(
     return store.emit();
   }
   if (!sessionRef) {
-    return store.withError("Create or select a session before sending a message.");
+    // 欢迎页直接发消息：在当前选中工作区自动创建新会话再发送
+    // （"有什么可以帮你？"页面 onSend → 这里；没有会话时不再报错卡住）
+    const workspaceId = store.state.selectedWorkspaceId ?? store.state.workspaces[0]?.id;
+    if (!workspaceId) {
+      return store.withError("没有可用的工作区，请先添加一个工作区。");
+    }
+    await store.createSession({ workspaceId });
+    const createdRef = store.selectedSessionRef();
+    if (!createdRef) {
+      return store.withError("自动创建会话失败，请手动新建会话后重试。");
+    }
+    return submitComposerToSession(store, createdRef, textInput, [], options);
   }
 
   return submitComposerToSession(store, sessionRef, textInput, attachments, options);

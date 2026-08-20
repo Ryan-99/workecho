@@ -304,4 +304,95 @@ contextBridge.exposeInMainWorld("piApp", {
       ipcRenderer.removeListener(desktopIpc.themeChanged, handler);
     };
   },
+  // 业务数据汇总（右侧状态面板用）
+  getBusinessSummary: () => ipcRenderer.invoke("workbench:get-summary"),
+  // 业务提示词（设置页可编辑）
+  getBusinessPrompt: () => ipcRenderer.invoke("workbench:get-prompt") as Promise<string>,
+  saveBusinessPrompt: (content: string) => ipcRenderer.invoke("workbench:save-prompt", content) as Promise<string>,
+  // 首次启动引导
+  onboardingPickWorkspace: () => ipcRenderer.invoke("onboarding:pick-workspace") as Promise<string | null>,
+  onboardingConfirmWorkspace: (p: string) => ipcRenderer.invoke("onboarding:confirm-workspace", p) as Promise<string>,
+  onboardingScan: () => ipcRenderer.invoke("onboarding:scan") as Promise<{ total: number; ok: number; categories: Record<string, number> }>,
+  onboardingFinish: () => ipcRenderer.invoke("onboarding:finish") as Promise<boolean>,
+  // 默认工作目录路径（给引导页显示）
+  getDefaultWorkspacePath: () => ipcRenderer.invoke("workbench:get-default-path") as Promise<string>,
+  needsOnboarding: () => ipcRenderer.invoke("workbench:needs-onboarding") as Promise<boolean>,
+  generateSessionTitle: (workspaceId: string, sessionId: string) =>
+    ipcRenderer.invoke("workbench:generate-title", workspaceId, sessionId) as Promise<string | null>,
+  compactSession: () => ipcRenderer.invoke("workbench:compact-session") as Promise<DesktopAppState | null>,
+  getExtensionsConfig: () => ipcRenderer.invoke("workbench:get-extensions-config"),
+  saveMcpConfig: (servers: Record<string, any>) => ipcRenderer.invoke("workbench:save-mcp-config", servers),
+  openDir: (dirPath: string) => ipcRenderer.invoke("workbench:open-dir", dirPath),
+  getCards: () => ipcRenderer.invoke("workbench:get-cards"),
+  saveCards: (cards: any[]) => ipcRenderer.invoke("workbench:save-cards", cards),
+  getCardData: () => ipcRenderer.invoke("workbench:get-card-data"),
+  deleteSessionForever: (workspaceId: string, sessionId: string) =>
+    ipcRenderer.invoke("workbench:delete-session-forever", workspaceId, sessionId) as Promise<DesktopAppState | null>,
+  checkUpdate: () => ipcRenderer.invoke("workbench:check-update"),
+  openReleases: (url?: string) => ipcRenderer.invoke("workbench:open-releases", url),
+  minimizeWindow: () => ipcRenderer.invoke("workbench:minimize-window"),
+  updateEntity: (entityType: string, entityId: string, updates: Record<string, unknown>) =>
+    ipcRenderer.invoke("workbench:update-entity", entityType, entityId, updates),
+  getTodoRules: () => ipcRenderer.invoke("workbench:get-todo-rules") as Promise<string>,
+  saveTodoRules: (content: string) => ipcRenderer.invoke("workbench:save-todo-rules", content) as Promise<string>,
+  getSessionStats: () => ipcRenderer.invoke("workbench:get-session-stats"),
+  exportSession: (format: "html" | "jsonl") => ipcRenderer.invoke("workbench:export-session", format) as Promise<string | null>,
+  setAutoCompact: (enabled: boolean) => ipcRenderer.invoke("workbench:set-auto-compact", enabled),
+  getAutoCompact: () => ipcRenderer.invoke("workbench:get-auto-compact") as Promise<boolean>,
+  setAutoRetry: (enabled: boolean) => ipcRenderer.invoke("workbench:set-auto-retry", enabled),
+  setSteeringMode: (mode: string) => ipcRenderer.invoke("workbench:set-steering-mode", mode),
+  getContextUsage: () => ipcRenderer.invoke("workbench:get-context-usage"),
+  getSessionTools: () => ipcRenderer.invoke("workbench:get-session-tools"),
+  getSchemaInfo: () => ipcRenderer.invoke("workbench:get-schema-info"),
+  // Wiki 知识库配置
+  getWikiConfig: () => ipcRenderer.invoke("workbench:get-wiki-config"),
+  saveWikiConfig: (config: Record<string, unknown>) => ipcRenderer.invoke("workbench:save-wiki-config", config),
+  patchWikiConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke("workbench:patch-wiki-config", patch),
+  // Agent 自我修改插件管理（与 Extensions 设置页联动）
+  listPlugins: () => ipcRenderer.invoke("workbench:list-plugins"),
+  removePlugin: (name: string) => ipcRenderer.invoke("workbench:remove-plugin", name),
+  createPlugin: (name: string, code: string) => ipcRenderer.invoke("workbench:create-plugin", name, code),
+  createSkill: (name: string, description: string, content: string) => ipcRenderer.invoke("workbench:create-skill", name, description, content),
+  pickDirectory: () => ipcRenderer.invoke("workbench:pick-directory"),
+  importSkill: (sourceDir: string) => ipcRenderer.invoke("workbench:import-skill", sourceDir),
+  // Hooks 规则管理（P2）
+  listHooks: () => ipcRenderer.invoke("workbench:list-hooks"),
+  addHook: (input: Record<string, unknown>) => ipcRenderer.invoke("workbench:add-hook", input),
+  removeHook: (ruleId: string) => ipcRenderer.invoke("workbench:remove-hook", ruleId),
+  // 工具进度（长任务进度条）
+  onToolProgress: (listener: (p: { tool: string; phase: string; current: number; total: number; message?: string }) => void) => {
+    const handler = (_e: unknown, payload: any) => listener(payload);
+    ipcRenderer.on("workbench:tool-progress", handler);
+    return () => ipcRenderer.removeListener("workbench:tool-progress", handler);
+  },
+  // 会话分组管理
+  getSessionGroups: () => ipcRenderer.invoke("workbench:get-session-groups"),
+  createSessionGroup: (name: string) => ipcRenderer.invoke("workbench:create-session-group", name),
+  removeSessionGroup: (groupId: string) => ipcRenderer.invoke("workbench:remove-session-group", groupId),
+  assignSessionGroup: (sessionId: string, groupId: string | null) => ipcRenderer.invoke("workbench:assign-session-group", sessionId, groupId),
+  // 定时任务管理（渲染层 UI 用）
+  listSchedulesUI: () => ipcRenderer.invoke("workbench:list-schedules-ui"),
+  createScheduleUI: (rule: Record<string, unknown>) => ipcRenderer.invoke("workbench:create-schedule-ui", rule),
+  removeScheduleUI: (ruleId: string) => ipcRenderer.invoke("workbench:remove-schedule-ui", ruleId),
+  // Wiki 统计/图谱/搜索（Phase 5）
+  // CoStrict 一键接入（托管 costrict-router，登录/断开走 loginProvider/logoutProvider）
+  costrictStatus: () => ipcRenderer.invoke("workbench:costrict-status"),
+  // 应用内弹窗（主进程发起 → 渲染层展示 → 结果回传）
+  onAppDialog: (listener: (spec: any) => void) => {
+    const handler = (_e: unknown, payload: any) => listener(payload);
+    ipcRenderer.on("workbench:app-dialog", handler);
+    return () => ipcRenderer.removeListener("workbench:app-dialog", handler);
+  },
+  appDialogResult: (id: number, result: { ok: boolean; value?: string }) =>
+    ipcRenderer.invoke("workbench:app-dialog-result", id, result),
+  onCostrictEvent: (listener: (e: { step: string; message: string }) => void) => {
+    const handler = (_e: unknown, payload: any) => listener(payload);
+    ipcRenderer.on("workbench:costrict-event", handler);
+    return () => ipcRenderer.removeListener("workbench:costrict-event", handler);
+  },
+  getWikiStats: () => ipcRenderer.invoke("workbench:wiki-stats"),
+  getWikiGraph: () => ipcRenderer.invoke("workbench:wiki-graph"),
+  getWikiPages: () => ipcRenderer.invoke("workbench:wiki-pages"),
+  readWikiPage: (relPath: string) => ipcRenderer.invoke("workbench:wiki-read-page", relPath),
+  wikiSearch: (query: string, limit?: number) => ipcRenderer.invoke("workbench:wiki-search", query, limit),
 });

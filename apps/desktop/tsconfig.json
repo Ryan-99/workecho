@@ -18,5 +18,5 @@
     "types": ["node", "vite/client"]
   },
   "include": ["src"],
-  "exclude": ["electron", "dist", "dist-electron", "out", "node_modules"]
+  "exclude": ["src/legacy", "electron", "dist", "dist-electron", "out", "node_modules"]
 }

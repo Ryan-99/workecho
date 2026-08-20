@@ -12,6 +12,7 @@ import type {
   AppView,
   ComposerAttachment,
   ComposerDraftSyncSource,
+  CreateSessionInput,
   DesktopAppState,
   ExtensionCommandCompatibilityRecord,
   QueuedComposerMessage,
@@ -52,6 +53,7 @@ export interface AppStoreInternals {
   withSessionError(sessionRef: SessionRef, error: unknown): Promise<DesktopAppState>;
   withErrorHandling(fn: () => Promise<DesktopAppState>): Promise<DesktopAppState>;
   selectSessionFast(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
+  createSession(input: CreateSessionInput): Promise<DesktopAppState>;
   workspaceRefFromState(workspaceId: string): WorkspaceRef | undefined;
   selectedSessionRef(): SessionRef | undefined;
   getExtensionFilePath(workspaceId: string, filePath: string): string | undefined;

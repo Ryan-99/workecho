@@ -1,8 +1,8 @@
 import { app, net, Notification, shell } from "electron";
 
 const RELEASES_URL =
-  "https://api.github.com/repos/minghinmatthewlam/pi-gui/releases?per_page=1";
-const RELEASES_PAGE = "https://github.com/minghinmatthewlam/pi-gui/releases";
+  "https://api.github.com/repos/Ryan-Sangfor/workbench/releases?per_page=1";
+const RELEASES_PAGE = "https://github.com/Ryan-Sangfor/workbench/releases";
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const INITIAL_DELAY_MS = 15_000; // 15 seconds after launch

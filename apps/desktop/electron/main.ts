@@ -8,14 +8,15 @@ import {
   nativeImage,
   net,
   shell,
+  Notification,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
-  type MessageBoxOptions,
 } from "electron";
 import { isValidHttpBaseUrl } from "@pi-gui/pi-sdk-driver";
 import { randomUUID } from "node:crypto";
-import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext } from "./pi-compat";
 import { readFile, stat } from "node:fs/promises";
+import { existsSync, writeFileSync, readFileSync, readdirSync, unlinkSync, appendFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { augmentPosixPath } from "../scripts/augment-path.cjs";
@@ -25,6 +26,31 @@ import {
   createOrchestrationRuntimeTools,
   type OrchestrationRuntimeBridge,
 } from "./orchestration-runtime";
+import { createBusinessRuntimeExtension } from "./business-runtime";
+import {
+  PROVIDER_ID as COSTRICT_PROVIDER_ID, LOCAL_BASE_URL as COSTRICT_LOCAL_URL, DEFAULT_BASE_URL as COSTRICT_DEFAULT_URL,
+  costrictLogin, costrictStart, costrictStop, costrictStatus, downloadBinary, installBundledBinary, fetchCostrictModels, readState as costrictReadState, writeState as costrictWriteState, managedBinaryPath,
+} from "./costrict-service";
+import type { CustomProviderInput } from "@pi-gui/pi-sdk-driver";
+import { createPolicyExtension, setHookNotifier, setDangerousOpConfirmer } from "./tool-pipeline";
+import { createMemoryInjectionExtension } from "./memory-injection";
+import { updateMemory, getWikiStats, getWikiGraph, searchWiki, listWikiPages, readWikiPage } from "./wiki-manager";
+import { getBusinessSummary, getCardData, readEntity, entityFile } from "./business-store";
+import { createMcpExtension } from "./mcp-client";
+import { readCardConfig, saveCardConfig, type CardConfig } from "./card-config";
+import { readTodoRules, writeTodoRules } from "./todo-rules";
+import { readWikiConfig, writeWikiConfig, patchWikiConfig, getActiveWikiConfig, type WikiConfig } from "./wiki-config";
+import { ensureScheduleFile, readScheduleRules, addScheduleRule, removeScheduleRule } from "./schedule-service";
+import { readSessionGroups, createGroup, removeGroup, assignSessionToGroup } from "./session-groups";
+import { listPlugins, removePlugin, createPlugin } from "./plugin-service";
+import { createSkill, importSkill, userSkillsRoot } from "./skill-service";
+import { ensureHooksFile, readHookRules, addHookRule, removeHookRule } from "./hooks-service";
+import { setProgressWindowsProvider } from "./progress-broadcaster";
+import { initWorkspaceDir, runInitScan } from "./workbench-init";
+import { importFiles, scanDocs, getCommonDocDirs } from "./knowledge-service";
+import { readBusinessPrompt, writeBusinessPrompt, syncPromptToWorkspace } from "./business-prompt";
+import { ReminderScheduler } from "./reminder-scheduler";
+import { TodoReminderService } from "./todo-reminder";
 import * as orchestrationTools from "./app-store-orchestration";
 import { getChangedFiles, getFileDiff, stageFile } from "./app-store-diff";
 import { listWorkspaceFiles, readWorkspaceFile } from "./app-store-files";
@@ -67,6 +93,10 @@ const isDev = Boolean(process.env.ELECTRON_RENDERER_URL);
 const appTestMode = resolveAppTestMode(process.env.PI_APP_TEST_MODE);
 const windowTestMode = appTestMode ?? "foreground";
 const devReloadMarkersEnabled = process.env.PI_APP_DEV_RELOAD_MARKERS === "1";
+// dev 诊断：PI_APP_CDP=1 时开 CDP 端口（http://127.0.0.1:9223/json）
+if (process.env.PI_APP_CDP === "1") {
+  app.commandLine.appendSwitch("remote-debugging-port", "9223");
+}
 let store: DesktopAppStore;
 const themeManager = new ThemeManager();
 let mainWindow: BrowserWindow | null = null;
@@ -97,6 +127,8 @@ const stopTrackingWindowActivationByWebContentsId = new Map<number, () => void>(
 let stopNotifications: (() => void) | undefined;
 let stopUpdateChecker: (() => void) | undefined;
 let stopPruningTerminals: (() => void) | undefined;
+let reminderScheduler: ReminderScheduler | undefined;
+let todoReminder: TodoReminderService | undefined;
 let retainedTerminalWorkspacePathSignature = "";
 const terminalFocusedWebContentsIds = new Set<number>();
 let quittingAfterStoreFlush = false;
@@ -182,6 +214,7 @@ function createTestExtensionContext(sessionRef: SessionRef): ExtensionContext {
     ui: {} as ExtensionContext["ui"],
     modelRegistry: {} as ExtensionContext["modelRegistry"],
     model: undefined,
+    scopedModels: [],
     signal: undefined,
     isIdle: () => true,
     isProjectTrusted: () => true,
@@ -215,10 +248,15 @@ function getTerminalService(): TerminalService {
 // it is copied to `process.resourcesPath` via `extraResources` in
 // electron-builder.yml. On macOS packaged builds the window/dock icon already
 // comes from `icon.icns` in the app bundle, so we only need the PNG for dev
-// and for Linux/Windows window chrome.
-const appIconPath = app.isPackaged
-  ? path.join(process.resourcesPath, "icon.png")
-  : path.join(__dirname, "..", "..", "resources", "icon.png");
+// and for Linux/Windows window chrome. On Windows prefer the ICO — the
+// taskbar renders it more reliably than PNG.
+const resourcesDir = app.isPackaged
+  ? process.resourcesPath
+  : path.join(__dirname, "..", "..", "resources");
+const icoPath = path.join(resourcesDir, "icon.ico");
+const appIconPath = process.platform === "win32" && existsSync(icoPath)
+  ? icoPath
+  : path.join(resourcesDir, "icon.png");
 const appIcon = nativeImage.createFromPath(appIconPath);
 
 function parseExternalWebUrl(url: string): URL | null {
@@ -294,8 +332,9 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     transparent: enableTransparency,
     vibrancy: process.platform === "darwin" && enableTransparency ? "under-window" : undefined,
-    titleBarStyle: "hiddenInset",
-    backgroundColor: enableTransparency ? "#00000000" : "#f3f4f8",
+    titleBarStyle: "hidden",
+    frame: process.platform === "darwin" ? undefined : false,
+    backgroundColor: enableTransparency ? "#00000000" : "#ffffff",
     trafficLightPosition: { x: 18, y: 18 },
     show: false,
     icon: appIcon,
@@ -374,7 +413,8 @@ function createWindow(): BrowserWindow {
 
   if (isDev) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL as string);
-    if (process.env.PI_APP_OPEN_DEVTOOLS !== "0") {
+    // DevTools 默认不打开（按需：PI_APP_OPEN_DEVTOOLS=1 时才带出调试窗口）
+    if (process.env.PI_APP_OPEN_DEVTOOLS === "1") {
       window.webContents.openDevTools({ mode: "detach" });
     }
   } else {
@@ -865,8 +905,26 @@ async function pickWorkspaceViaDialog(parentWindow?: BrowserWindow | null): Prom
 
 async function runManualUpdateCheck(): Promise<void> {
   const window = mainWindow && canPublishToWindow(mainWindow) ? mainWindow : undefined;
-  const showDialog = (options: MessageBoxOptions) =>
-    window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options);
+  const showDialog = async (options: {
+    message: string;
+    detail?: string;
+    buttons?: string[];
+    type?: "info" | "warning" | "error";
+    title?: string;
+    defaultId?: number;
+    cancelId?: number;
+  }): Promise<{ response: number }> => {
+    const buttons = options.buttons ?? ["OK"];
+    const isConfirm = buttons.length > 1;
+    const r = await showAppDialog(window, {
+      kind: isConfirm ? "confirm" : "alert",
+      message: options.message,
+      ...(options.detail ? { detail: options.detail } : {}),
+      ...(isConfirm ? { confirmText: buttons[0], cancelText: buttons[1] ?? "取消" } : {}),
+    });
+    // 取消/失败 → 视为选择了非默认项（与原生 cancelId 语义一致）
+    return { response: r?.ok ? 0 : 1 };
+  };
 
   try {
     const result = await checkForUpdate();
@@ -986,10 +1044,26 @@ if (augmentedPath.changed) {
   process.env.PATH = augmentedPath.path;
 }
 
+// Windows GPU 进程在某些驱动下会崩溃（exit_code=143）。禁用 GPU 硬件加速，
+// 回退到软件渲染，代价是轻微的动画/滚动性能损失，但保证窗口能稳定显示。
+app.commandLine.appendSwitch("disable-gpu");
+app.commandLine.appendSwitch("disable-software-rasterizer");
+app.disableHardwareAcceleration();
+
 app.setName("pi");
 
 const configuredUserDataDir = process.env.PI_APP_USER_DATA_DIR?.trim() || app.getPath("userData");
 app.setPath("userData", configuredUserDataDir);
+// 默认 workspace 路径（userData/Workbench）。
+// 不自动创建——首次启动由引导页创建；已初始化则直接用。
+const defaultWorkspacePath = path.join(configuredUserDataDir, "Workbench");
+const alreadyInitialized = existsSync(path.join(defaultWorkspacePath, ".workbench-initialized"));
+if (alreadyInitialized) {
+  // 已初始化：确保目录存在（防御性），同步提示词
+  initWorkspaceDir(defaultWorkspacePath);
+  const businessPrompt = readBusinessPrompt(configuredUserDataDir);
+  syncPromptToWorkspace(defaultWorkspacePath, businessPrompt);
+}
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -1006,6 +1080,23 @@ app.on("second-instance", () => {
   }
   window.show();
   window.focus();
+});
+
+// ── 全局崩溃日志：任何未捕获异常把堆栈写进 userData/crash.log（便于定位"无堆栈闪退"） ──
+function appendCrashLog(kind: string, error: unknown): void {
+  try {
+    const stack = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
+    const line = `\n[${new Date().toISOString()}] ${kind}\n${stack}\n`;
+    appendFileSync(path.join(app.getPath("userData"), "crash.log"), line, "utf-8");
+  } catch { /* 日志本身失败则忽略 */ }
+}
+process.on("uncaughtException", (error) => {
+  appendCrashLog("uncaughtException", error);
+  // 保持默认行为（退出），但留下证据
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  appendCrashLog("unhandledRejection", reason);
 });
 
 app.whenReady().then(async () => {
@@ -1030,8 +1121,45 @@ app.whenReady().then(async () => {
       }
     | undefined;
   const orchestrationRuntimeBridge = createStoreBackedOrchestrationRuntimeBridge();
+  // MCP 扩展（异步初始化，读取 ~/.pi/agent/mcp-servers.json + 启动子进程）
+  const mcpAgentDir = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".pi", "agent");
+  const mcpExtension = await createMcpExtension(mcpAgentDir).catch(() => null);
+  registerAppDialogResultIpc();
+  // 注意：costrictDir 必须在下方自愈 IIFE 之前声明（曾因 TDZ 报 Cannot access before initialization）
+  const costrictDir = path.join(configuredUserDataDir, "costrict");
+
+  // CoStrict 服务自愈：已接入（key 已存）但本地代理未运行时，启动时自动拉起。
+  // 否则应用/系统重启后 127.0.0.1:14567 不在，所有 costrict 模型请求静默失败。
+  void (async () => {
+    try {
+      installBundledBinary({ resourcesDir: path.join(app.getAppPath(), "resources"), dir: costrictDir });
+      const st = await costrictStatus({ dir: costrictDir });
+      if (st.binaryPresent && st.apiKeySaved && !st.serviceRunning) {
+        const r = await costrictStart({ dir: costrictDir, binPath: managedBinaryPath(costrictDir) });
+        console.log(`[costrict] 启动自愈: healthy=${r.healthy}`);
+      }
+    } catch (e) {
+      console.warn("[costrict] 启动自愈失败:", (e as Error).message);
+    }
+  })();
+
+  // Hook 桌面通知（策略层解耦：不直接依赖 electron，见 tool-pipeline.ts）
+  setHookNotifier((title, body) => {
+    try { new Notification({ title, body }).show(); } catch { /* 通知失败忽略 */ }
+  });
+  // 危险操作确认（P2 补全）：应用内弹窗，拒绝则否决工具执行
+  setDangerousOpConfirmer(async (title, body) => {
+    const r = await showAppDialog(mainWindow, { kind: "confirm", message: title, detail: body, danger: true });
+    return r?.ok === true;
+  });
   const driverOptions = {
-    extensionFactories: [createOrchestrationRuntimeExtension(orchestrationRuntimeBridge)],
+    extensionFactories: [
+      createOrchestrationRuntimeExtension(orchestrationRuntimeBridge),
+      createBusinessRuntimeExtension(),
+      createMemoryInjectionExtension(), // P4：会话启动自动注入 memory
+      createPolicyExtension(), // A2 工具执行管道（审计+安全拦截）
+      ...(mcpExtension ? [mcpExtension] : []),
+    ],
     inlineExtensionMetadata: [
       {
         displayName: "Thread orchestration",
@@ -1049,6 +1177,27 @@ app.whenReady().then(async () => {
   });
   await store.initialize();
   themeManager.setMode(store.state.themeMode);
+  // 工具进度广播：把主进程工具进度推给所有窗口
+  setProgressWindowsProvider(() => BrowserWindow.getAllWindows());
+  // 启动定时提醒调度器（每日检查维保到期 + 逾期待办，推送桌面通知）
+  reminderScheduler = new ReminderScheduler(() => {
+    const st = store.state;
+    const ws = st?.workspaces?.find((w) => w.id === st.selectedWorkspaceId);
+    return ws?.path ?? defaultWorkspacePath;
+  });
+  reminderScheduler.start();
+  // 待办提醒服务（提前10分钟提醒，5分钟检查一次）
+  todoReminder = new TodoReminderService(() => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    return ws?.path ?? defaultWorkspacePath;
+  }, configuredUserDataDir);
+  todoReminder.start();
+
+  // 首次启动文档扫描：只在已引导过（sentinel 存在）时自动补扫。
+  // 全新用户走 OnboardingView 交互式引导，不在这里自动扫。
+  // runInitScan 内部有 sentinel 检查，已扫过会直接跳过。
+  // （引导页的 onboarding:scan / onboarding:finish 会写 sentinel）
   integratedTerminalShell = (await store.getState()).integratedTerminalShell;
   stopPruningTerminals = store.subscribe((state) => {
     integratedTerminalShell = state.integratedTerminalShell;
@@ -1140,6 +1289,476 @@ app.whenReady().then(async () => {
     }
     return shell.openExternal(parsed.toString());
   });
+  // 业务数据汇总：给右侧状态面板用。从当前 workspace 的 workbench/ 目录读。
+  ipcMain.handle("workbench:get-summary", async (event) => {
+    const st = store.state;
+    if (!st || !st.workspaces) return null;
+    let ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    // 如果选中的 workspace 路径下没有 workbench/ 目录，回退到默认 workspace
+    if (ws && !existsSync(path.join(ws.path, "workbench"))) {
+      ws = st.workspaces.find((w) => w.path === defaultWorkspacePath) ?? st.workspaces[0];
+    }
+    if (!ws) return null;
+    const summary = getBusinessSummary(ws.path);
+    return summary;
+  });
+  // 业务提示词：读取 / 保存
+  ipcMain.handle("workbench:get-prompt", () => readBusinessPrompt(configuredUserDataDir));
+  ipcMain.handle("workbench:save-prompt", (_event, content: string) => {
+    writeBusinessPrompt(configuredUserDataDir, content);
+    // 同步到当前 workspace 的 AGENTS.md
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (ws) syncPromptToWorkspace(ws.path, content);
+    return content;
+  });
+  // 默认工作目录路径（给引导页显示）
+  ipcMain.handle("workbench:get-default-path", () => defaultWorkspacePath);
+  // 首次启动检测：workspace 已初始化（.workbench-initialized 存在）则不弹引导
+  ipcMain.handle("workbench:needs-onboarding", () => {
+    return !existsSync(path.join(defaultWorkspacePath, ".workbench-initialized"));
+  });
+  // 首次启动引导：选择工作目录（弹原生文件夹选择器）
+  ipcMain.handle("onboarding:pick-workspace", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+      title: "选择 Workbench 工作目录",
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+  // 确认工作目录：把选定目录注册为 workspace + 初始化 workbench 结构
+  ipcMain.handle("onboarding:confirm-workspace", async (_event, workspacePath: string) => {
+    initWorkspaceDir(workspacePath);  // 确保 workbench 子目录存在（幂等）
+    const prompt = readBusinessPrompt(configuredUserDataDir);
+    syncPromptToWorkspace(workspacePath, prompt);
+    // 把这个 workspace 注册到 store（如果还没有）—— 防护 store 未就绪
+    try {
+      await store.initialize();
+      const st = store.state;
+      if (st?.workspaces && !st.workspaces.some((w) => w.path === workspacePath)) {
+        await store.addWorkspace(workspacePath);
+      }
+    } catch (e) {
+      console.warn("[onboarding] 注册 workspace 失败（store 可能未就绪）:", (e as Error).message);
+    }
+    return workspacePath;
+  });
+  // 首次启动引导：执行全 PC 扫描
+  ipcMain.handle("onboarding:scan", async () => {
+    // 扫描导入目标：当前选中的工作区（而不是写死的默认 Workbench——
+    // 用户切换工作区后扫进默认库，会导致"导入完成但界面看不到"）
+    const wsPath = store.state.workspaces.find((w) => w.id === store.state.selectedWorkspaceId)?.path ?? defaultWorkspacePath;
+    const dirs = getCommonDocDirs();
+    const allFiles: string[] = [];
+    for (const d of dirs) { allFiles.push(...scanDocs(d, 5)); }
+    const result = await importFiles(wsPath, allFiles);
+    return result;
+  });
+  // 扩展能力：读取 MCP/命令/插件配置 + 打开对应目录
+  ipcMain.handle("workbench:get-extensions-config", async () => {
+    const agentDir = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".pi", "agent");
+    const wsDir = store.state.workspaces.find((w) => w.id === store.state.selectedWorkspaceId)?.path ?? defaultWorkspacePath;
+    const promptsDir = path.join(agentDir, "prompts");
+    const extensionsDir = path.join(wsDir, ".pi", "extensions");
+    const mcpConfigPath = path.join(agentDir, "mcp-servers.json");
+
+    // MCP servers
+    let mcpServers: Record<string, any> = {};
+    try {
+      if (existsSync(mcpConfigPath)) {
+        const raw = JSON.parse(readFileSync(mcpConfigPath, "utf-8"));
+        mcpServers = raw.servers ?? raw;
+      }
+    } catch {}
+
+    // 自定义命令
+    const commands: string[] = [];
+    try {
+      if (existsSync(promptsDir)) {
+        for (const f of readdirSync(promptsDir)) {
+          if (f.endsWith(".md")) commands.push(f.replace(/\.md$/, ""));
+        }
+      }
+    } catch {}
+
+    // 插件
+    const extensions: string[] = [];
+    try {
+      if (existsSync(extensionsDir)) {
+        for (const f of readdirSync(extensionsDir)) {
+          if (f.endsWith(".ts") || f.endsWith(".js")) extensions.push(f);
+        }
+      }
+    } catch {}
+
+    return { mcpServers, commands, extensions, paths: { agentDir, promptsDir, extensionsDir, mcpConfigPath } };
+  });
+
+  // 保存 MCP server 配置
+  ipcMain.handle("workbench:save-mcp-config", async (_event, servers: Record<string, any>) => {
+    const agentDir = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".pi", "agent");
+    const mcpConfigPath = path.join(agentDir, "mcp-servers.json");
+    writeFileSync(mcpConfigPath, JSON.stringify({ servers }, null, 2), "utf-8");
+    // P1-a 热加载：MCP 变更后刷新运行时
+    try {
+      const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
+      if (ws) await store.driver.runtimeSupervisor.refreshRuntime(ws);
+    } catch { /* ignore */ }
+    return true;
+  });
+
+  /* ============ CoStrict 一键接入（托管 costrict-router，入口=loginProvider("costrict")） ============ */
+  const costrictEvent = (step: string, message: string) => {
+    try { mainWindow?.webContents.send("workbench:costrict-event", { step, message }); } catch { /* 窗口未就绪忽略 */ }
+  };
+
+  ipcMain.handle("workbench:costrict-status", async () => {
+    // 内置二进制随应用分发：查询状态时顺带完成首次安装（零网络）
+    installBundledBinary({ resourcesDir: path.join(app.getAppPath(), "resources"), dir: costrictDir });
+    const status = await costrictStatus({ dir: costrictDir });
+    let providerRegistered = false;
+    try {
+      const customs = await store.driver.runtimeSupervisor.listCustomProviders();
+      providerRegistered = customs.some((c: any) => c.providerId === COSTRICT_PROVIDER_ID);
+    } catch { /* ignore */ }
+    return { ...status, providerRegistered };
+  });
+
+  /** 一键登录：地址（记忆>询问）→ 二进制 → 浏览器 SSO → 启动捕获 key → 注册 provider */
+  async function costrictOneClickLogin(opts: {
+    baseUrl?: string;
+    callbacks?: {
+      onAuth: (info: { url: string; instructions?: string }) => Promise<void> | void;
+      onPrompt: (p: { message: string; placeholder?: string; allowEmpty?: boolean }) => Promise<string>;
+      onProgress?: (m: string) => Promise<void> | void;
+    };
+  }): Promise<{ ok: boolean; error?: string }> {
+    const binPath = managedBinaryPath(costrictDir);
+    try {
+      // 1. CoStrict 服务地址：显式传入 > 上次记忆 > 对话框询问（只问一次）
+      let baseUrl = opts.baseUrl?.trim().replace(/\/$/, "");
+      if (!baseUrl) baseUrl = costrictReadState(costrictDir).upstreamBaseUrl?.trim().replace(/\/$/, "");
+      if (!baseUrl) {
+        // 应用内弹窗预填默认地址：不输入直接确认 = 用默认
+        const r = await showAppDialog(mainWindow, {
+          kind: "prompt",
+          message: "请输入 CoStrict 服务地址（企业内网地址，只需填写一次）",
+          placeholder: COSTRICT_DEFAULT_URL,
+          defaultValue: COSTRICT_DEFAULT_URL,
+        });
+        if (r === null || !r.ok) return { ok: false, error: "已取消登录" };
+        baseUrl = ((r.value ?? "").trim().replace(/\/$/, "")) || COSTRICT_DEFAULT_URL;
+      }
+      if (!baseUrl || !/^https?:\/\/.+/.test(baseUrl)) return { ok: false, error: "需要有效的 CoStrict 服务地址（https://…）" };
+
+      // 2. 确保二进制：优先应用内置（零网络依赖），未内置平台才下载
+      const status = await costrictStatus({ dir: costrictDir });
+      if (!status.binaryPresent) {
+        const installed = installBundledBinary({ resourcesDir: path.join(app.getAppPath(), "resources"), dir: costrictDir });
+        if (!installed) {
+          await opts.callbacks?.onProgress?.("首次使用：正在下载 costrict-router...");
+          const dl = await downloadBinary({ dir: costrictDir, fetchImpl: net.fetch as typeof fetch, log: (m) => costrictEvent("download", m) });
+          if (!dl.ok) return { ok: false, error: `下载失败: ${dl.error}` };
+        }
+      }
+
+      // 3. 登录（onAuth 打开浏览器并提示；等待 SSO 完成）
+      const login = await costrictLogin({
+        binPath, baseUrl,
+        onLoginUrl: (url) => {
+          void opts.callbacks?.onAuth?.({ url, instructions: "请在浏览器中完成 CoStrict 企业登录，完成后会自动继续。" });
+        },
+      });
+      if (!login.ok) return { ok: false, error: `登录未完成: ${login.output.slice(-160)}` };
+      costrictWriteState(costrictDir, { upstreamBaseUrl: baseUrl });
+
+      // 4. 启动本地代理 + 捕获一次性 key
+      await opts.callbacks?.onProgress?.("启动本地代理服务...");
+      const started = await costrictStart({ dir: costrictDir, binPath });
+      const apiKey = started.apiKey ?? costrictReadState(costrictDir).apiKey;
+      if (!apiKey) return { ok: false, error: "服务已启动，但未能捕获本地 API Key（仅显示一次），请重试" };
+      if (!started.healthy) return { ok: false, error: "本地代理服务未就绪，请稍后重试" };
+
+      // 5. 注册 provider + 热刷新
+      await opts.callbacks?.onProgress?.("注册 CoStrict 模型...");
+      const registered = await registerCostrictProvider(apiKey);
+      if (!registered) return { ok: false, error: "已登录并启动，但获取模型列表失败（服务端模型为空？）" };
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  }
+
+  /** 把本地代理注册为 pi 自定义 Provider 并刷新运行时 */
+  async function registerCostrictProvider(apiKey: string): Promise<boolean> {
+    try {
+      // 注意：本地回环请求用 Node 原生 fetch——net.fetch 走 Chromium 网络栈，
+      // 会受系统代理规则影响请求 127.0.0.1（实测 ERR），GitHub 下载才需要 net.fetch
+      const models = await fetchCostrictModels({ apiKey });
+      if (models.length === 0) return false;
+      const input: CustomProviderInput = {
+        providerId: COSTRICT_PROVIDER_ID,
+        baseUrl: COSTRICT_LOCAL_URL,
+        apiKey,
+        models,
+      };
+      const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
+      if (ws) await store.driver.runtimeSupervisor.setCustomProvider(ws, input);
+      if (ws) await store.driver.runtimeSupervisor.refreshRuntime(ws);
+      return true;
+    } catch (e) {
+      console.warn("[costrict] 注册 provider 失败:", (e as Error).message);
+      return false;
+    }
+  }
+
+  /** 断开：停服务 + 清 key + 注销 provider */
+  async function costrictDisconnect(): Promise<void> {
+    try { await costrictStop(managedBinaryPath(costrictDir)); } catch { /* 服务可能未运行 */ }
+    costrictWriteState(costrictDir, { apiKey: undefined });
+    try {
+      const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
+      if (ws) await store.driver.runtimeSupervisor.deleteCustomProvider(ws, COSTRICT_PROVIDER_ID);
+      if (ws) await store.driver.runtimeSupervisor.refreshRuntime(ws);
+    } catch { /* ignore */ }
+  }
+
+  // 打开目录（系统文件管理器）。只接受真实存在的目录：
+  // shell.openPath 对文件按系统默认方式打开（Windows 下 .exe/.bat 即执行），
+  // 被入侵的渲染层可借任意路径直达执行（安全审核 F-28）
+  ipcMain.handle("workbench:open-dir", async (_event, dirPath: string) => {
+    try {
+      const st = statSync(dirPath);
+      if (!st.isDirectory()) return { ok: false, reason: "仅支持打开目录" };
+      await shell.openPath(dirPath);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: (e as Error).message };
+    }
+  });
+
+  // 上下文用量（token 估算）
+  ipcMain.handle("workbench:get-context-usage", async () => {
+    try {
+      const st = store.state;
+      const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+      if (!ws) { console.log("[ctx-usage] no workspace"); return null; }
+      const session = ws.sessions.find((s) => s.id === st.selectedSessionId);
+      if (!session) { console.log("[ctx-usage] no session"); return null; }
+      // 直接从 transcript 估算（不用 getSelectedTranscriptForView，避免 view 参数问题）
+      // 用 renderer 已有的 transcript data 更可靠，但 main 端需要自己读
+      // 改为从 store 的 transcript snapshot 取
+      const transcript: any = (store as any).getSelectedTranscriptForView
+        ? await (store as any).getSelectedTranscriptForView({ workspaceId: ws.id, sessionId: session.id })
+        : null;
+      const messages = transcript?.transcript ?? [];
+      const totalChars = messages.reduce((sum: number, m: any) => {
+        if (m.kind === "message") return sum + (m.text?.length ?? 0);
+        if (m.kind === "tool") return sum + JSON.stringify(m.input ?? "").length + JSON.stringify(m.output ?? "").length;
+        return sum;
+      }, 0);
+      const estimatedTokens = Math.max(1, Math.ceil(totalChars / 4));
+      const runtime = st.runtimeByWorkspace[ws.id];
+      const model = runtime?.models?.find((m: any) => m.available);
+      const contextWindow = (model as any)?.contextWindow ?? 128000;
+      const percent = Math.round((estimatedTokens / contextWindow) * 100);
+      return { tokens: estimatedTokens, contextWindow, percent };
+    } catch (e) { console.warn("[ctx-usage] error:", (e as Error).message); return null; }
+  });
+
+  // 工具开关：获取已注册工具列表
+  ipcMain.handle("workbench:get-session-tools", async () => {
+    try {
+      const st = store.state;
+      const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+      if (!ws?.id) return { all: [], active: [] };
+      const runtime = st.runtimeByWorkspace[ws.id];
+      // tools 是 string[]（工具名），从 extensions 里收集
+      const all = (runtime?.extensions ?? []).flatMap((ext: any) => ext.tools ?? []);
+      // 去重
+      const unique = [...new Set(all)];
+      return { all: unique, active: unique };
+    } catch { return { all: [], active: [] }; }
+  });
+
+  // schema 版本检查
+  ipcMain.handle("workbench:get-schema-info", async () => {
+    try {
+      const st = store.state;
+      const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+      if (!ws?.id) return null;
+      const session = ws.sessions.find((s) => s.id === st.selectedSessionId);
+      if (!session) return null;
+      return (session as any).schemaInfo ?? null;
+    } catch { return null; }
+  });
+
+  // 检查更新
+  ipcMain.handle("workbench:check-update", async () => {
+    try {
+      return await checkForUpdate();
+    } catch (e) {
+      return { status: "error", message: (e as Error).message };
+    }
+  });
+  ipcMain.handle("workbench:open-releases", async (_event, url?: string) => {
+    await openReleasesPage(url);
+  });
+
+  // 卡片配置：读取 / 保存
+  ipcMain.handle("workbench:get-cards", () => readCardConfig(configuredUserDataDir));
+  ipcMain.handle("workbench:save-cards", (_event, cards: CardConfig[]) => {
+    saveCardConfig(configuredUserDataDir, cards);
+    return cards;
+  });
+  // 卡片数据：按配置动态查询
+  ipcMain.handle("workbench:get-card-data", async () => {
+    const st = store.state;
+    let ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (ws && !existsSync(path.join(ws.path, "workbench"))) {
+      ws = st.workspaces.find((w) => w.path === defaultWorkspacePath) ?? st.workspaces[0];
+    }
+    if (!ws) return {};
+    const cards = readCardConfig(configuredUserDataDir);
+    const data = getCardData(ws.path, cards);
+    return data;
+  });
+
+  // Phase 5: Wiki 统计（知识库概览卡片用）
+  ipcMain.handle("workbench:wiki-stats", async () => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return null;
+    return getWikiStats(ws.path);
+  });
+
+  // Phase 5: Wiki 知识图谱数据（graph view 用）
+  // 知识库浏览页：页面列表 + 正文读取
+  ipcMain.handle("workbench:wiki-pages", async () => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return [];
+    return listWikiPages(ws.path);
+  });
+  ipcMain.handle("workbench:wiki-read-page", (_event, relPath: string) => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return null;
+    return readWikiPage(ws.path, relPath);
+  });
+
+  ipcMain.handle("workbench:wiki-graph", async () => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return { nodes: [], edges: [] };
+    return getWikiGraph(ws.path);
+  });
+
+  // Phase 5: Wiki 全文搜索（搜索 UI 用）
+  ipcMain.handle("workbench:wiki-search", async (_event, query: string, limit?: number) => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return [];
+    return searchWiki(ws.path, query, { limit: limit ?? 20 });
+  });
+
+  // 彻底删除会话（删 jsonl 文件 + 从 catalog 移除）
+  ipcMain.handle("workbench:delete-session-forever", async (_event, workspaceId: string, sessionId: string) => {
+    try {
+      const st = store.state;
+      const ws = st.workspaces.find((w) => w.id === workspaceId);
+      if (!ws) return null;
+      // 先归档（从运行时移除 + catalog 移除）
+      await store.archiveSession({ workspaceId, sessionId } as any);
+      // 在 pi sessions 目录里找包含 sessionId 的 jsonl 文件并删除
+      const agentDir = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".pi", "agent", "sessions");
+      if (existsSync(agentDir)) {
+        for (const dir of readdirSync(agentDir)) {
+          const sessionDir = path.join(agentDir, dir);
+          if (!existsSync(sessionDir)) continue;
+          for (const file of readdirSync(sessionDir)) {
+            if (file.includes(sessionId)) {
+              try { unlinkSync(path.join(sessionDir, file)); } catch {}
+              console.log(`[delete-forever] 已删除: ${file}`);
+            }
+          }
+        }
+      }
+      return store.state;
+    } catch (e) {
+      console.warn("[delete-forever] 失败:", (e as Error).message);
+      return null;
+    }
+  });
+
+  // 手动压缩当前会话（pi 内置 compact）
+  ipcMain.handle("workbench:compact-session", async (event) => {
+    try {
+      const view = viewForWebContents(event.sender.id);
+      if (!view) return null;
+      const st = store.state;
+      const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+      if (!ws || !st.selectedSessionId) return null;
+      await store.driver.compactSession({ workspaceId: ws.id, sessionId: st.selectedSessionId } as any);
+      return store.state;
+    } catch (e) {
+      console.warn("[compact] 压缩失败:", (e as Error).message);
+      return null;
+    }
+  });
+
+  // 会话标题总结：用 LLM 总结对话内容生成标题，在切出会话时调用
+  ipcMain.handle("workbench:generate-title", async (_event, workspaceId: string, sessionId: string) => {
+    try {
+      const st = store.state;
+      const ws = st.workspaces.find((w) => w.id === workspaceId);
+      if (!ws) return null;
+      const session = ws.sessions.find((s) => s.id === sessionId);
+      if (!session) return null;
+      // 只在标题是默认值时才生成（New thread / 新会话 / 空标题 / workspace 名）
+      const isDefaultTitle = !session.title
+        || session.title === "New thread"
+        || session.title === "新会话"
+        || session.title === ws.name
+        || session.title === "Workbench";
+      if (!isDefaultTitle) return session.title;
+      // 取会话 transcript 作为总结输入
+      const transcript = await store.getSelectedTranscriptForView({ workspaceId, sessionId } as any);
+      const messages = transcript?.transcript ?? [];
+      // 拼接对话文本（取前 6 条消息，避免太长）
+      const dialogue = messages
+        .filter((m: any) => m.kind === "message")
+        .slice(0, 6)
+        .map((m: any) => `${m.role === "user" ? "用户" : "助手"}: ${(m.text ?? "").slice(0, 200)}`)
+        .join("\n");
+      if (!dialogue.trim()) return null;
+      // 通过 driver 生成标题
+      const title = await store.driver.generateThreadTitle(
+        { workspaceId, path: ws.path } as any,
+        { prompt: dialogue },
+      );
+      if (title && title.trim()) {
+        await store.renameSession({ workspaceId, sessionId } as any, title.trim());
+        return title.trim();
+      }
+      return null;
+    } catch (e) {
+      console.warn("[title-gen] 生成标题失败:", (e as Error).message);
+      return null;
+    }
+  });
+
+  // 引导完成：标记 sentinel（不再自动扫描）+ 通知渲染层刷新业务数据
+  ipcMain.handle("onboarding:finish", () => {
+    const sentinel = path.join(defaultWorkspacePath, ".init-scan-done");
+    writeFileSync(sentinel, new Date().toISOString(), "utf-8");
+    // 通知渲染层：业务数据已就绪，立即刷新状态面板
+    if (mainWindow) {
+      mainWindow.webContents.send("workbench:data-refreshed");
+    }
+    return true;
+  });
   ipcMain.handle(desktopIpc.stateRequest, (event) => store.getStateForView(viewForWebContents(event.sender.id)));
   ipcMain.handle(desktopIpc.selectedTranscriptRequest, (event) =>
     store.getSelectedTranscriptForView(viewForWebContents(event.sender.id)),
@@ -1182,7 +1801,22 @@ app.whenReady().then(async () => {
     runWindowScopedForEvent(event, () => store.syncCurrentWorkspace()),
   );
   ipcMain.handle(desktopIpc.selectSession, (event, target: WorkspaceSessionTarget) =>
-    runWindowScopedForEvent(event, () => store.selectSession(target)),
+    runWindowScopedForEvent(event, async () => {
+      const result = store.selectSessionFast(target);
+      // Phase 2: 会话切换时更新 working-context（受配置控制）
+      try {
+        const wikiConfig = readWikiConfig(configuredUserDataDir);
+        if (wikiConfig.autoUpdateContext) {
+          const st = store.state;
+          const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+          if (ws?.path) {
+            const ts = new Date().toLocaleString("zh-CN", { hour12: false });
+            updateMemory(ws.path, "working-context", `\n## 会话切换\n- ${ts} 切换到会话`, "append");
+          }
+        }
+      } catch { /* 非阻塞 */ }
+      return result;
+    }),
   );
   ipcMain.handle(desktopIpc.renameSession, (event, target: WorkspaceSessionTarget, title: string) =>
     runWindowScopedForEvent(event, () => store.renameSession(target, title)),
@@ -1229,13 +1863,27 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle(desktopIpc.loginProvider, (event, workspaceId: string, providerId: string) => {
     const window = BrowserWindow.fromWebContents(event.sender);
+    // CoStrict：走托管 costrict-router 的一键登录（和 OAuth 行同款交互）
+    if (providerId === "costrict") {
+      return runUnscopedStateResultForWindow(window, async () => {
+        const r = await costrictOneClickLogin({ callbacks: createRuntimeLoginCallbacks(window) });
+        if (!r.ok) throw new Error(r.error);
+        return store.emit();
+      });
+    }
     return runUnscopedStateResultForWindow(window, () =>
       store.loginProvider(workspaceId, providerId, createRuntimeLoginCallbacks(window)),
     );
   });
-  ipcMain.handle(desktopIpc.logoutProvider, (event, workspaceId: string, providerId: string) =>
-    runWindowScopedForEvent(event, () => store.logoutProvider(workspaceId, providerId)),
-  );
+  ipcMain.handle(desktopIpc.logoutProvider, (event, workspaceId: string, providerId: string) => {
+    if (providerId === "costrict") {
+      return runWindowScopedForEvent(event, async () => {
+        await costrictDisconnect();
+        return store.emit();
+      });
+    }
+    return runWindowScopedForEvent(event, () => store.logoutProvider(workspaceId, providerId));
+  });
   ipcMain.handle(desktopIpc.setProviderApiKey, (event, workspaceId: string, providerId: string, apiKey: string) =>
     runWindowScopedForEvent(event, () => store.setProviderApiKey(workspaceId, providerId, apiKey)),
   );
@@ -1463,6 +2111,313 @@ app.whenReady().then(async () => {
       await stageFile(workspacePath, filePath, { sourcePath: stagingSourcePath });
     },
   );
+  // 会话统计（token/cost/消息数）
+  ipcMain.handle("workbench:get-session-stats", async () => {
+    try {
+      const st = store.state;
+      const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+      if (!ws?.id) return null;
+      const session = ws.sessions.find((s) => s.id === st.selectedSessionId);
+      if (!session) return null;
+      // 从 transcript 估算
+      const transcript = await store.getSelectedTranscriptForView({ workspaceId: ws.id, sessionId: session.id } as any);
+      const messages = transcript?.transcript ?? [];
+      const messageCount = messages.filter((m: any) => m.kind === "message").length;
+      const toolCallCount = messages.filter((m: any) => m.kind === "tool").length;
+      const totalChars = messages.reduce((sum: number, m: any) => {
+        if (m.kind === "message") return sum + (m.text?.length ?? 0);
+        if (m.kind === "tool") return sum + JSON.stringify(m.input ?? "").length;
+        return sum;
+      }, 0);
+      return {
+        messageCount,
+        toolCallCount,
+        estimatedTokens: Math.ceil(totalChars / 4),
+      };
+    } catch { return null; }
+  });
+
+  // 导出会话
+  ipcMain.handle("workbench:export-session", async (_event, format: "html" | "jsonl", outputPath?: string) => {
+    try {
+      const st = store.state;
+      const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+      if (!ws?.id) return null;
+      // 简易导出：transcript → text
+      const transcript = await store.getSelectedTranscriptForView({ workspaceId: ws.id, sessionId: st.selectedSessionId } as any);
+      const messages = transcript?.transcript ?? [];
+      if (format === "jsonl") {
+        const lines = messages.map((m: any) => JSON.stringify(m)).join("\n");
+        return lines;
+      }
+      // html
+      const html = messages.map((m: any) => {
+        if (m.kind === "message") return `<div class="msg ${m.role}"><b>${m.role}</b>: ${(m.text ?? "").replace(/</g, "&lt;")}</div>`;
+        if (m.kind === "tool") return `<div class="tool">🔧 ${m.toolName}</div>`;
+        return "";
+      }).join("\n");
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Session Export</title>
+        <style>.msg{margin:8px 0;padding:8px;border-radius:8px}.user{background:#e8e8e8}.assistant{background:#f5f5f5}.tool{color:#666;font-size:12px}</style>
+        </head><body>${html}</body></html>`;
+    } catch (e) { return null; }
+  });
+
+  // 自动压缩设置 — 写入 pi settings.json
+  ipcMain.handle("workbench:set-auto-compact", async (_event, enabled: boolean) => {
+    try {
+      const agentDir = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".pi", "agent");
+      const settingsPath = path.join(agentDir, "settings.json");
+      let settings: any = {};
+      if (existsSync(settingsPath)) {
+        settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+      }
+      settings.compaction = { ...settings.compaction, enabled };
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+      // 刷新当前 session 让设置生效
+      const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
+      if (ws) await store.driver.runtimeSupervisor.refreshRuntime(ws);
+      return enabled;
+    } catch (e) {
+      console.warn("[auto-compact] 设置失败:", (e as Error).message);
+      return null;
+    }
+  });
+
+  // 读取自动压缩当前值
+  ipcMain.handle("workbench:get-auto-compact", async () => {
+    try {
+      const agentDir = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".pi", "agent");
+      const settingsPath = path.join(agentDir, "settings.json");
+      if (!existsSync(settingsPath)) return true;  // 默认开启
+      const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+      return settings.compaction?.enabled ?? true;
+    } catch { return true; }
+  });
+
+  // Steering/FollowUp 模式 — 通过 session supervisor 设置
+  ipcMain.handle("workbench:set-steering-mode", async (_event, mode: string) => {
+    // steering 模式目前仅由 renderer 本地记忆，下次 run 组装消息时生效，
+    // 暂无主进程侧状态需要写入
+    return mode;
+  });
+
+  // 待办排序规则：读取 / 保存
+  ipcMain.handle("workbench:get-todo-rules", () => readTodoRules(configuredUserDataDir));
+  ipcMain.handle("workbench:save-todo-rules", (_event, content: string) => {
+    writeTodoRules(configuredUserDataDir, content);
+    // 同步到 AGENTS.md
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (ws) {
+      const prompt = readBusinessPrompt(configuredUserDataDir);
+      const fullPrompt = prompt + "\n\n" + content;
+      syncPromptToWorkspace(ws.path, fullPrompt);
+    }
+    return content;
+  });
+
+  // ── Wiki 知识库配置 ──
+  ipcMain.handle("workbench:get-wiki-config", () => readWikiConfig(configuredUserDataDir));
+  ipcMain.handle("workbench:save-wiki-config", (_event, config: WikiConfig) => {
+    writeWikiConfig(configuredUserDataDir, config);
+    return config;
+  });
+  ipcMain.handle("workbench:patch-wiki-config", async (_event, patch: Partial<WikiConfig>) => {
+    const updated = patchWikiConfig(configuredUserDataDir, patch);
+    // dailyBriefing toggle → 自动创建/删除每日早报定时规则
+    if ("dailyBriefing" in patch || "dailyBriefingTime" in patch) {
+      const st = store.state;
+      const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+      if (ws?.path) {
+        try {
+          ensureScheduleFile(ws.path);
+          if (updated.dailyBriefing) {
+            // upsert：固定 id "daily-briefing"，开启时创建/更新
+            addScheduleRule(ws.path, {
+              id: "daily-briefing",
+              name: "每日早报",
+              trigger: { type: "every", time: updated.dailyBriefingTime },
+              action: "查询今日待办 + 维保到期 + 日程冲突，生成简报。用简洁的方式汇报重点事项。",
+            });
+          } else {
+            removeScheduleRule(ws.path, "daily-briefing");
+          }
+        } catch { /* 非关键路径 */ }
+      }
+    }
+    return updated;
+  });
+
+  // ── Agent 自我修改插件管理（与 Extensions 设置页联动） ──
+  ipcMain.handle("workbench:list-plugins", async () => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return [];
+    return listPlugins(ws.path);
+  });
+  ipcMain.handle("workbench:remove-plugin", async (_event, name: string) => {
+    const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
+    if (!ws) return false;
+    const ok = removePlugin(ws.path, name);
+    if (ok) {
+      try { await store.driver.runtimeSupervisor.refreshRuntime(ws); } catch { /* ignore */ }
+    }
+    return ok;
+  });
+  // 设置页新建插件（带代码验证 + 热加载）。
+  // 与 Agent 工具路径（business-runtime wiki_create_plugin）一致：受 selfModifyPlugins
+  // 总开关门控——插件是可执行代码，写入即热加载（安全审核 F-27）
+  ipcMain.handle("workbench:create-plugin", async (_event, name: string, code: string) => {
+    let selfModifyEnabled = false;
+    try { selfModifyEnabled = getActiveWikiConfig().selfModifyPlugins === true; } catch { /* 读取失败视为关闭 */ }
+    if (!selfModifyEnabled) {
+      return { created: false, reason: "插件自修改未开启（设置 → Wiki → 允许 Agent 创建插件）" };
+    }
+    const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
+    if (!ws) return { created: false, reason: "无可用工作区" };
+    const result = createPlugin(ws.path, name, code);
+    // P1-a 热加载：创建成功后刷新运行时
+    if ((result as any).created) {
+      try { await store.driver.runtimeSupervisor.refreshRuntime(ws); (result as any).hotReloaded = true; } catch { /* 刷新失败保留重启提示 */ }
+    }
+    return result;
+  });
+  // 设置页新建 Skill（写 ~/.pi/agent/skills/<name>/SKILL.md + 热加载）
+  ipcMain.handle("workbench:create-skill", async (_event, name: string, description: string, content: string) => {
+    try {
+      const result = createSkill(userSkillsRoot(), name, description, content);
+      if (!result.created) return result;
+      const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
+      if (ws) {
+        try { await store.driver.runtimeSupervisor.refreshRuntime(ws); (result as any).hotReloaded = true; } catch { /* 刷新失败不阻塞创建 */ }
+      }
+      return result;
+    } catch (e) {
+      return { created: false, reason: (e as Error).message };
+    }
+  });
+
+  // ── Skill 导入（设置页：技能包 = 含 SKILL.md 的目录） ──
+  ipcMain.handle("workbench:pick-directory", async () => {
+    const r = await dialog.showOpenDialog(mainWindow!, {
+      title: "选择要导入的 Skill 目录（需包含 SKILL.md）",
+      properties: ["openDirectory"],
+    });
+    return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]!;
+  });
+  ipcMain.handle("workbench:import-skill", async (_event, sourceDir: string) => {
+    try {
+      const result = importSkill(userSkillsRoot(), sourceDir);
+      if (!result.imported) return result;
+      const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
+      if (ws) {
+        try { await store.driver.runtimeSupervisor.refreshRuntime(ws); (result as any).hotReloaded = true; } catch { /* 刷新失败不阻塞导入 */ }
+      }
+      return result;
+    } catch (e) {
+      return { imported: false, reason: (e as Error).message };
+    }
+  });
+
+  // ── 会话分组管理 ──
+  ipcMain.handle("workbench:get-session-groups", () => {
+    return readSessionGroups(configuredUserDataDir);
+  });
+  ipcMain.handle("workbench:create-session-group", (_event, name: string) => {
+    return createGroup(configuredUserDataDir, name);
+  });
+  ipcMain.handle("workbench:remove-session-group", (_event, groupId: string) => {
+    return removeGroup(configuredUserDataDir, groupId);
+  });
+  ipcMain.handle("workbench:assign-session-group", (_event, sessionId: string, groupId: string | null) => {
+    return assignSessionToGroup(configuredUserDataDir, sessionId, groupId);
+  });
+
+  // ── Hooks 规则管理（P2，设置页 UI） ──
+  ipcMain.handle("workbench:list-hooks", async () => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return [];
+    ensureHooksFile(ws.path);
+    return readHookRules(ws.path);
+  });
+  ipcMain.handle("workbench:add-hook", async (_event, input: { name: string; event: string; toolName: string; action: string; message: string }) => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return null;
+    return addHookRule(ws.path, input as any);
+  });
+  ipcMain.handle("workbench:remove-hook", async (_event, ruleId: string) => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return false;
+    return removeHookRule(ws.path, ruleId);
+  });
+
+  // ── 定时任务管理（渲染层读写 schedule.md） ──
+  ipcMain.handle("workbench:list-schedules-ui", async () => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return [];
+    ensureScheduleFile(ws.path);
+    return readScheduleRules(ws.path);
+  });
+  ipcMain.handle("workbench:create-schedule-ui", async (_event, rule: { name: string; triggerType: "every" | "at" | "before_event"; time?: string; weekday?: number; days?: number; entityType?: string; field?: string; action: string }) => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return null;
+    ensureScheduleFile(ws.path);
+    return addScheduleRule(ws.path, {
+      name: rule.name,
+      trigger: {
+        type: rule.triggerType,
+        time: rule.time,
+        weekday: rule.weekday,
+        days: rule.days,
+        entityType: rule.entityType,
+        field: rule.field,
+      },
+      action: rule.action,
+    });
+  });
+  ipcMain.handle("workbench:remove-schedule-ui", async (_event, ruleId: string) => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return false;
+    return removeScheduleRule(ws.path, ruleId);
+  });
+
+  // 更新实体字段（供渲染层勾选待办等操作）
+  ipcMain.handle("workbench:update-entity", async (_event, entityType: string, entityId: string, updates: Record<string, unknown>) => {
+    try {
+      const st = store.state;
+      let ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+      if (ws && !existsSync(path.join(ws.path, "workbench"))) {
+        ws = st.workspaces.find((w) => w.path === defaultWorkspacePath) ?? st.workspaces[0];
+      }
+      if (!ws) return null;
+      const existing = readEntity(ws.path, entityType, entityId);
+      if (!existing) return null;
+      const updatedFm = { ...existing.frontmatter, ...updates };
+      const fmText = Object.entries(updatedFm).map(([k, v]) => `${k}: ${v}`).join("\n");
+      writeFileSync(entityFile(ws.path, entityType, entityId), `---\n${fmText}\n---\n${existing.body}\n`, "utf-8");
+      // 如果是待办标记为完成，推送通知
+      if (entityType === "todos" && updates.status === "done" && todoReminder) {
+        todoReminder.notifyCompleted(String(existing.frontmatter.title ?? "待办"));
+      }
+      return true;
+    } catch (e) {
+      console.warn("[update-entity] 失败:", (e as Error).message);
+      return null;
+    }
+  });
+
+  // 最小化窗口
+  ipcMain.handle("workbench:minimize-window", (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    window?.minimize();
+  });
+
   ipcMain.handle(desktopIpc.toggleWindowMaximize, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window) {
@@ -1509,6 +2464,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
+  reminderScheduler?.stop();
+  reminderScheduler = undefined;
+  todoReminder?.stop();
+  todoReminder = undefined;
   stopNotifications?.();
   stopNotifications = undefined;
   notificationManager = undefined;
@@ -1545,14 +2504,11 @@ app.on("before-quit", (event) => {
 
 function resolveInitialWorkspacePaths(): readonly string[] {
   const raw = process.env.PI_APP_INITIAL_WORKSPACES;
-  if (raw !== undefined) {
-    return raw
-      .split(path.delimiter)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-  }
-
-  return [];
+  const fromEnv = raw !== undefined
+    ? raw.split(path.delimiter).map((entry) => entry.trim()).filter(Boolean)
+    : [];
+  // 首次启动把默认 workspace 加进去（已初始化过的会被 store 去重）
+  return [defaultWorkspacePath, ...fromEnv];
 }
 
 async function readComposerAttachment(filePath: string): Promise<ComposerAttachment> {
@@ -1626,6 +2582,55 @@ function validateComposerAttachmentPayload(attachment: ComposerAttachment): Comp
   return [normalized];
 }
 
+/* ============ 应用内弹窗（统一风格，替代原生 dialog/window.alert） ============ */
+let appDialogSeq = 0;
+const pendingAppDialogs = new Map<number, (r: { ok: boolean; value?: string }) => void>();
+
+function showAppDialog(
+  parentWindow: BrowserWindow | null | undefined,
+  spec: {
+    kind: "alert" | "confirm" | "prompt";
+    message: string;
+    detail?: string;
+    placeholder?: string;
+    defaultValue?: string;
+    confirmText?: string;
+    cancelText?: string;
+    danger?: boolean;
+  },
+): Promise<{ ok: boolean; value?: string } | null> {
+  const w = resolveDialogWindow(parentWindow) ?? mainWindow;
+  if (!w || w.isDestroyed()) return Promise.resolve(null);
+  const id = ++appDialogSeq;
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (r: { ok: boolean; value?: string }) => {
+      if (settled) return;
+      settled = true;
+      pendingAppDialogs.delete(id);
+      w.removeListener("closed", onClosed);
+      clearTimeout(guard);
+      resolve(r);
+    };
+    // 窗口关闭 → 视为取消；15 分钟安全兜底 → 防止调用方永久挂起
+    const onClosed = () => settle({ ok: false });
+    w.once("closed", onClosed);
+    const guard = setTimeout(() => settle({ ok: false }), 15 * 60_000);
+    pendingAppDialogs.set(id, settle);
+    w.show();
+    w.focus();
+    w.webContents.send("workbench:app-dialog", { id, ...spec });
+  });
+}
+
+function registerAppDialogResultIpc(): void {
+  ipcMain.handle("workbench:app-dialog-result", (_e, id: number, result: { ok: boolean; value?: string }) => {
+    pendingAppDialogs.get(id)?.(result ?? { ok: false });
+    pendingAppDialogs.delete(id);
+    return true;
+  });
+}
+
 function createRuntimeLoginCallbacks(window?: BrowserWindow | null) {
   return {
     onAuth: async ({ url, instructions }: { readonly url: string; readonly instructions?: string }) => {
@@ -1640,134 +2645,34 @@ function createRuntimeLoginCallbacks(window?: BrowserWindow | null) {
 }
 
 async function showLoginInstructions(parentWindow: BrowserWindow | null | undefined, message: string): Promise<void> {
-  const window = resolveDialogWindow(parentWindow);
-  if (!window) {
+  const r = await showAppDialog(parentWindow, { kind: "alert", message });
+  if (r === null) {
     throw new Error("Main window is not available for login instructions.");
   }
-  window.show();
-  window.focus();
-  await window.webContents.executeJavaScript(`window.alert(${JSON.stringify(message)})`, true);
 }
 
-// Electron does not implement window.prompt(), so provider-login text prompts
-// are served by a small dedicated modal window instead.
+// 登录等文本输入提示：应用内弹窗（保持原语义——取消/空值时抛错）
 async function promptForText(
   parentWindow: BrowserWindow | null | undefined,
   message: string,
   placeholder = "",
   allowEmpty = false,
 ): Promise<string> {
-  const parent = resolveDialogWindow(parentWindow);
-  if (!parent) {
-    throw new Error("Main window is not available for login.");
-  }
-  parent.show();
-  parent.focus();
-
-  const modal = new BrowserWindow({
-    parent,
-    modal: true,
-    show: false,
-    width: 460,
-    height: 220,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    title: "pi-gui",
-    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+  const r = await showAppDialog(parentWindow, {
+    kind: "prompt",
+    message,
+    placeholder,
   });
-
-  try {
-    await modal.loadURL(promptDataUrl(message, placeholder));
-    modal.show();
-    modal.focus();
-
-    const result = await new Promise<string | null>((resolve) => {
-      let settled = false;
-      const finish = (value: string | null) => {
-        if (!settled) {
-          settled = true;
-          resolve(value);
-        }
-      };
-      // Closing the window (title-bar close) counts as a cancel.
-      modal.once("closed", () => finish(null));
-      // The page wires its own buttons on load and exposes the outcome as a
-      // promise; awaiting it here avoids any handler-attachment race.
-      modal.webContents
-        .executeJavaScript("window.__piPromptResult", true)
-        .then((value) => finish(typeof value === "string" ? value : null))
-        .catch(() => finish(null));
-    });
-
-    if (result === null) {
-      throw new Error("Login cancelled.");
-    }
-    const trimmedResult = result.trim();
-    if (!allowEmpty && trimmedResult.length === 0) {
-      throw new Error("Login cancelled.");
-    }
-    return trimmedResult;
-  } finally {
-    if (!modal.isDestroyed()) {
-      modal.destroy();
-    }
+  if (r === null || !r.ok) {
+    throw new Error("Login cancelled.");
   }
+  const trimmed = (r.value ?? "").trim();
+  if (!allowEmpty && trimmed.length === 0) {
+    throw new Error("Login cancelled.");
+  }
+  return trimmed;
 }
 
-function promptDataUrl(message: string, placeholder: string): string {
-  const html = `<!doctype html><html><head><meta charset="utf-8" />
-<style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 18px 20px; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #f4f5f7; color: #1b1d22; display: flex; flex-direction: column; gap: 14px; height: 100vh; }
-  @media (prefers-color-scheme: dark) { body { background: #23262d; color: #e7e9ee; } input { background: #171a1f; color: #e7e9ee; border-color: #3a3f4a; } }
-  .msg { line-height: 1.4; white-space: pre-wrap; }
-  input { width: 100%; padding: 8px 10px; font-size: 13px; border: 1px solid #c3c8d0; border-radius: 6px;
-    background: #fff; color: inherit; }
-  input:focus { outline: 2px solid #4a8cff; outline-offset: 0; border-color: #4a8cff; }
-  .row { margin-top: auto; display: flex; justify-content: flex-end; gap: 8px; }
-  button { padding: 6px 16px; font-size: 13px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; }
-  #pi-prompt-cancel { background: transparent; border-color: #b7bdc7; color: inherit; }
-  #pi-prompt-ok { background: #2f6ae0; color: #fff; }
-</style></head>
-<body>
-  <div class="msg">${escapeHtml(message)}</div>
-  <input id="pi-prompt-input" type="text" placeholder="${escapeHtml(placeholder)}" autofocus />
-  <div class="row">
-    <button id="pi-prompt-cancel" type="button">Cancel</button>
-    <button id="pi-prompt-ok" type="button">OK</button>
-  </div>
-  <script>
-    (function () {
-      var resolveResult;
-      window.__piPromptResult = new Promise(function (resolve) { resolveResult = resolve; });
-      function wire() {
-        var input = document.getElementById('pi-prompt-input');
-        var ok = document.getElementById('pi-prompt-ok');
-        var cancel = document.getElementById('pi-prompt-cancel');
-        if (!input || !ok || !cancel) { resolveResult(null); return; }
-        ok.addEventListener('click', function () { resolveResult(input.value); });
-        cancel.addEventListener('click', function () { resolveResult(null); });
-        input.addEventListener('keydown', function (event) {
-          if (event.key === 'Enter') { event.preventDefault(); resolveResult(input.value); }
-          else if (event.key === 'Escape') { event.preventDefault(); resolveResult(null); }
-        });
-        input.focus();
-        document.body.dataset.piReady = '1';
-      }
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', wire);
-      } else {
-        wire();
-      }
-    })();
-  </script>
-</body></html>`;
-  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
-}
 
 function escapeHtml(value: string): string {
   return value

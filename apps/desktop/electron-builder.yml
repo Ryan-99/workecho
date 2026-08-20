@@ -1,5 +1,5 @@
-appId: com.pi-gui.desktop
-productName: pi-gui
+appId: com.workecho.desktop
+productName: Workecho
 copyright: Copyright 2026 Matthew Lam
 electronVersion: 37.10.3
 
@@ -14,6 +14,8 @@ files:
 extraResources:
   - from: resources/icon.png
     to: icon.png
+  - from: resources/costrict
+    to: costrict
 
 asar: true
 asarUnpack:

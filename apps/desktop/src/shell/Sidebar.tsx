@@ -1,0 +1,351 @@
+import { useState, useEffect } from "react";
+import { appConfirm } from "./app-dialog";
+import {
+  Plus, Trash2, Archive, Settings as SettingsIcon, Pin,
+  ChevronRight, ChevronDown, FolderPlus, Folder, X, Clock, BookOpen } from "lucide-react";
+import type { SessionRecord } from "../desktop-state";
+
+interface SessionGroup {
+  id: string;
+  name: string;
+  order: number;
+}
+
+interface GroupsConfig {
+  groups: SessionGroup[];
+  assignmentBySession: Record<string, string>;
+}
+
+interface Props {
+  sessions: readonly SessionRecord[];
+  activeSessionId: string;
+  collapsed: boolean;
+  archivedCount: number;
+  workspaceId: string;
+  width: number;
+  onNewSession: () => void;
+  onSelectSession: (id: string) => void;
+  onArchiveSession: (id: string) => void;
+  onDeleteSession: (id: string) => void;
+  onOpenSettings: () => void;
+  onOpenArchive: () => void;
+  onResize: (e: React.MouseEvent) => void;
+}
+
+const UNCATEGORIZED = "__uncategorized__";
+const COLLAPSE_KEY = "sidebar-collapsed-groups";
+
+export function Sidebar({
+  sessions, activeSessionId, collapsed, archivedCount, workspaceId, width,
+  onNewSession, onSelectSession, onArchiveSession, onDeleteSession,
+  onOpenSettings, onOpenArchive, onResize,
+}: Props) {
+  const [groupsConfig, setGroupsConfig] = useState<GroupsConfig>({ groups: [], assignmentBySession: {} });
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [contextMenu, setContextMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const api = window as any;
+
+  // 加载分组配置
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const gc = await api.piApp?.getSessionGroups?.();
+        if (gc) setGroupsConfig(gc);
+      } catch { /* 静默降级 */ }
+    };
+    load();
+    // 从 localStorage 恢复折叠状态
+    try {
+      const saved = localStorage.getItem(COLLAPSE_KEY);
+      if (saved) setCollapsedGroups(new Set(JSON.parse(saved)));
+    } catch { /* ignore */ }
+  }, [workspaceId]);
+
+  // 关闭右键菜单
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [contextMenu]);
+
+  const toggleGroup = (gid: string) => {
+    const next = new Set(collapsedGroups);
+    if (next.has(gid)) next.delete(gid);
+    else next.add(gid);
+    setCollapsedGroups(next);
+    try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+  };
+
+  const handleCreateGroup = async () => {
+    const name = newGroupName.trim();
+    if (!name) { setCreatingGroup(false); return; }
+    try {
+      const updated = await api.piApp?.createSessionGroup?.(name);
+      if (updated) setGroupsConfig(updated);
+    } catch { /* ignore */ }
+    setNewGroupName("");
+    setCreatingGroup(false);
+  };
+
+  const handleRemoveGroup = async (gid: string) => {
+    try {
+      const updated = await api.piApp?.removeSessionGroup?.(gid);
+      if (updated) setGroupsConfig(updated);
+    } catch { /* ignore */ }
+  };
+
+  const handleAssign = async (sessionId: string, gid: string | null) => {
+    try {
+      const updated = await api.piApp?.assignSessionGroup?.(sessionId, gid);
+      if (updated) setGroupsConfig(updated);
+    } catch { /* ignore */ }
+    setContextMenu(null);
+  };
+
+  // 按 group 分桶
+  const buckets: Record<string, SessionRecord[]> = {};
+  for (const g of groupsConfig.groups) buckets[g.id] = [];
+  buckets[UNCATEGORIZED] = [];
+  for (const s of sessions) {
+    const gid = groupsConfig.assignmentBySession[s.id];
+    if (gid && buckets[gid]) buckets[gid].push(s);
+    else buckets[UNCATEGORIZED].push(s);
+  }
+
+  if (collapsed) return <aside className="sidebar collapsed" />;
+
+  const orderedGroups = [...groupsConfig.groups].sort((a, b) => a.order - b.order);
+
+  return (
+    <aside className="sidebar" style={{ width }}>
+      <div className="sidebar-resize-handle" onMouseDown={onResize} />
+
+      {/* ═══ 顶部固定区 ═══ */}
+      <div className="sidebar-topbar">
+        <button className="new-btn" onClick={onNewSession}><Plus size={15} /> 新建会话</button>
+
+        {/* 定时任务入口（进入管理页面） */}
+        <button
+          className="schedule-entry-btn"
+          onClick={() => window.dispatchEvent(new CustomEvent("open-schedule-manager"))}
+        >
+          <Clock size={13} /> 定时任务
+        </button>
+
+        {/* 知识库入口（独立页面：浏览/图谱） */}
+        <button
+          className="schedule-entry-btn"
+          onClick={() => window.dispatchEvent(new CustomEvent("open-wiki-manager"))}
+        >
+          <BookOpen size={13} /> 知识库
+        </button>
+      </div>
+
+      {/* ═══ 中间滚动区：分组 session 列表 ═══ */}
+      <div className="session-list">
+        {/* 新建分组 */}
+        {creatingGroup ? (
+          <div className="group-create-inline">
+            <input
+              autoFocus
+              className="group-name-input"
+              placeholder="分组名称"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleCreateGroup(); if (e.key === "Escape") { setCreatingGroup(false); setNewGroupName(""); } }}
+              onBlur={handleCreateGroup}
+            />
+          </div>
+        ) : (
+          <button className="group-add-btn" onClick={() => setCreatingGroup(true)}>
+            <Plus size={10} /> 新建分组
+          </button>
+        )}
+
+        {sessions.length === 0 && (
+          <div className="session-empty">新建第一个会话开始对话</div>
+        )}
+
+        {/* 按分组渲染 */}
+        {orderedGroups.map((g) => (
+          <SessionGroupSection
+            key={g.id}
+            group={g}
+            sessions={buckets[g.id] ?? []}
+            activeSessionId={activeSessionId}
+            workspaceId={workspaceId}
+            isCollapsed={collapsedGroups.has(g.id)}
+            onToggle={() => toggleGroup(g.id)}
+            onRemove={() => handleRemoveGroup(g.id)}
+            onSelect={onSelectSession}
+            onArchive={onArchiveSession}
+            onDelete={onDeleteSession}
+            onContextMenu={(e, sid) => {
+              e.preventDefault();
+              setContextMenu({ sessionId: sid, x: e.clientX, y: e.clientY });
+            }}
+          />
+        ))}
+
+        {/* 未分类 */}
+        {(buckets[UNCATEGORIZED]?.length > 0 || orderedGroups.length === 0) && (
+          <SessionGroupSection
+            group={{ id: UNCATEGORIZED, name: "未分类", order: -1 }}
+            sessions={buckets[UNCATEGORIZED] ?? sessions}
+            activeSessionId={activeSessionId}
+            workspaceId={workspaceId}
+            isCollapsed={collapsedGroups.has(UNCATEGORIZED)}
+            onToggle={() => toggleGroup(UNCATEGORIZED)}
+            onRemove={() => {}}
+            onSelect={onSelectSession}
+            onArchive={onArchiveSession}
+            onDelete={onDeleteSession}
+            onContextMenu={(e, sid) => {
+              e.preventDefault();
+              setContextMenu({ sessionId: sid, x: e.clientX, y: e.clientY });
+            }}
+            isUncategorized
+          />
+        )}
+      </div>
+
+      {/* ═══ 右键菜单：移动到分组 ═══ */}
+      {contextMenu && (
+        <div
+          className="session-context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="ctx-menu-label">移动到分组</div>
+          {orderedGroups.map((g) => (
+            <button
+              key={g.id}
+              className="ctx-menu-item"
+              onClick={() => handleAssign(contextMenu.sessionId, g.id)}
+            >
+              <Folder size={11} /> {g.name}
+            </button>
+          ))}
+          {groupsConfig.assignmentBySession[contextMenu.sessionId] && (
+            <button
+              className="ctx-menu-item"
+              onClick={() => handleAssign(contextMenu.sessionId, null)}
+            >
+              <X size={11} /> 移出分组
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ═══ 底部 footer ═══ */}
+      <div className="sidebar-footer">
+        <button onClick={onOpenArchive} title="归档管理"><Archive size={14} /> 归档{archivedCount > 0 && <span className="archive-badge">{archivedCount}</span>}</button>
+        <button onClick={onOpenSettings}><SettingsIcon size={14} /> 设置</button>
+      </div>
+    </aside>
+  );
+}
+
+/** 单个分组区块 */
+function SessionGroupSection({
+  group, sessions, activeSessionId, workspaceId,
+  isCollapsed, onToggle, onRemove, onSelect, onArchive, onDelete, onContextMenu, isUncategorized,
+}: {
+  group: SessionGroup;
+  sessions: SessionRecord[];
+  activeSessionId: string;
+  workspaceId: string;
+  isCollapsed: boolean;
+  onToggle: () => void;
+  onRemove: () => void;
+  onSelect: (id: string) => void;
+  onArchive: (id: string) => void;
+  onDelete: (id: string) => void;
+  onContextMenu: (e: React.MouseEvent, sessionId: string) => void;
+  isUncategorized?: boolean;
+}) {
+  return (
+    <div className={`session-group ${isCollapsed ? "collapsed" : ""}`}>
+      <div className="session-group-header" onClick={onToggle}>
+        {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+        <Folder size={12} style={{ opacity: 0.6 }} />
+        <span className="session-group-name">{group.name}</span>
+        <span className="session-group-count">{sessions.length}</span>
+        {!isUncategorized && (
+          <button
+            className="session-group-del"
+            title="删除分组"
+            onClick={(e) => { e.stopPropagation(); void appConfirm(`删除分组"${group.name}"？组内会话将回到未分类。`, { danger: true }).then((ok) => { if (ok) onRemove(); }); }}
+          ><X size={11} /></button>
+        )}
+      </div>
+      {!isCollapsed && sessions.length > 0 && (
+        <div className="session-group-body">
+          {sessions.map((s) => (
+            <SessionItemRow
+              key={s.id}
+              session={s}
+              isActive={s.id === activeSessionId}
+              workspaceId={workspaceId}
+              onSelect={onSelect}
+              onArchive={onArchive}
+              onDelete={onDelete}
+              onContextMenu={onContextMenu}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 单条 session */
+function SessionItemRow({
+  session: s, isActive, workspaceId, onSelect, onArchive, onDelete, onContextMenu,
+}: {
+  session: SessionRecord;
+  isActive: boolean;
+  workspaceId: string;
+  onSelect: (id: string) => void;
+  onArchive: (id: string) => void;
+  onDelete: (id: string) => void;
+  onContextMenu: (e: React.MouseEvent, sessionId: string) => void;
+}) {
+  return (
+    <div
+      className={`session-item ${isActive ? "active" : ""}`}
+      onClick={() => onSelect(s.id)}
+      onContextMenu={(e) => onContextMenu(e, s.id)}
+    >
+      {s.pinnedAt && <Pin size={11} className="session-pin-icon" />}
+      <span className="title">{s.title || "新会话"}</span>
+      {s.hasUnseenUpdate && !isActive && <span className="session-unread-dot" />}
+      <div className="session-actions">
+        <button
+          className="action-btn"
+          title={s.pinnedAt ? "取消置顶" : "置顶"}
+          onClick={(e) => {
+            e.stopPropagation();
+            window.piApp.setSessionPinned({ workspaceId, sessionId: s.id }, !s.pinnedAt);
+          }}
+        ><Pin size={13} style={s.pinnedAt ? { color: "var(--accent-blue)" } : {}} /></button>
+        <button
+          className="action-btn"
+          title="归档"
+          onClick={(e) => { e.stopPropagation(); onArchive(s.id); }}
+        ><Archive size={13} /></button>
+        <button
+          className="action-btn danger"
+          title="删除"
+          onClick={(e) => {
+            e.stopPropagation();
+            void appConfirm(`删除会话"${s.title || "新会话"}"？`, { danger: true }).then((ok) => { if (ok) onDelete(s.id); });
+          }}
+        ><Trash2 size={13} /></button>
+      </div>
+    </div>
+  );
+}
