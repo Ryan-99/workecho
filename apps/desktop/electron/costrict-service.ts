@@ -132,18 +132,61 @@ export interface CostrictState {
   verifiedDownloads?: Record<string, string>;
 }
 
+/**
+ * 密钥编解码器：main 启动时注入 Electron safeStorage（安全审核 CS-3：
+ * apiKey 不再明文落盘）。不注入（单测/无 Electron）时保持明文行为。
+ */
+export interface SecretCodec {
+  encode(plain: string): string;
+  decode(encoded: string): string;
+}
+
+let secretCodec: SecretCodec | null = null;
+
+/** main 启动时注入；传 null 清除（单测 afterEach） */
+export function setSecretCodec(codec: SecretCodec | null): void {
+  secretCodec = codec;
+}
+
+/** 磁盘形态：apiKey 加密后存 apiKeyEnc；旧版明文 apiKey 仅作读取兼容 */
+interface CostrictStateOnDisk extends CostrictState {
+  apiKeyEnc?: string;
+}
+
 export function readState(dir: string): CostrictState {
+  let raw: CostrictStateOnDisk;
   try {
-    return JSON.parse(readFileSync(path.join(dir, STATE_FILE), "utf-8"));
+    raw = JSON.parse(readFileSync(path.join(dir, STATE_FILE), "utf-8"));
   } catch {
     return {};
   }
+  const state: CostrictState = { ...raw };
+  delete (state as CostrictStateOnDisk).apiKeyEnc;
+  if (typeof raw.apiKeyEnc === "string" && secretCodec) {
+    try {
+      state.apiKey = secretCodec.decode(raw.apiKeyEnc);
+    } catch {
+      state.apiKey = undefined; // 解密失败（系统凭据变更等）→ 视为无 key，重新登录
+    }
+  }
+  // 旧明文 apiKey 原样返回；下一次 writeState 会自动迁移为加密形态
+  return state;
 }
 
 export function writeState(dir: string, patch: CostrictState): CostrictState {
   const next = { ...readState(dir), ...patch };
   mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, STATE_FILE), JSON.stringify(next, null, 2), "utf-8");
+  const disk: CostrictStateOnDisk = { ...next };
+  if (typeof next.apiKey === "string" && secretCodec) {
+    try {
+      disk.apiKeyEnc = secretCodec.encode(next.apiKey);
+      delete disk.apiKey;
+    } catch {
+      // 加密失败 → 保留明文字段（功能可用性优先，仅退化到旧行为）
+    }
+  }
+  if (next.apiKey === undefined) delete disk.apiKey;
+  writeFileSync(path.join(dir, STATE_FILE), JSON.stringify(disk, null, 2), "utf-8");
   return next;
 }
 

@@ -7,13 +7,14 @@ import {
   Menu,
   nativeImage,
   net,
+  safeStorage,
   shell,
   Notification,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
 } from "electron";
 import { isValidHttpBaseUrl } from "@pi-gui/pi-sdk-driver";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { AgentToolResult, ExtensionContext } from "./pi-compat";
 import { readFile, stat } from "node:fs/promises";
 import { existsSync, writeFileSync, readFileSync, readdirSync, unlinkSync, appendFileSync, statSync } from "node:fs";
@@ -29,14 +30,14 @@ import {
 import { createBusinessRuntimeExtension } from "./business-runtime";
 import {
   PROVIDER_ID as COSTRICT_PROVIDER_ID, LOCAL_BASE_URL as COSTRICT_LOCAL_URL, DEFAULT_BASE_URL as COSTRICT_DEFAULT_URL,
-  costrictLogin, costrictStart, costrictStop, costrictStatus, downloadBinary, installBundledBinary, fetchCostrictModels, readState as costrictReadState, writeState as costrictWriteState, managedBinaryPath,
+  costrictLogin, costrictStart, costrictStop, costrictStatus, downloadBinary, installBundledBinary, fetchCostrictModels, readState as costrictReadState, writeState as costrictWriteState, setSecretCodec as setCostrictSecretCodec, managedBinaryPath,
 } from "./costrict-service";
 import type { CustomProviderInput } from "@pi-gui/pi-sdk-driver";
 import { createPolicyExtension, setHookNotifier, setDangerousOpConfirmer } from "./tool-pipeline";
 import { createMemoryInjectionExtension } from "./memory-injection";
 import { updateMemory, getWikiStats, getWikiGraph, searchWiki, listWikiPages, readWikiPage } from "./wiki-manager";
 import { getBusinessSummary, getCardData, readEntity, entityFile } from "./business-store";
-import { createMcpExtension } from "./mcp-client";
+import { createMcpExtension, summarizeMcpChanges } from "./mcp-client";
 import { readCardConfig, saveCardConfig, type CardConfig } from "./card-config";
 import { readTodoRules, writeTodoRules } from "./todo-rules";
 import { readWikiConfig, writeWikiConfig, patchWikiConfig, getActiveWikiConfig, setActiveWikiUserDataDir, type WikiConfig } from "./wiki-config";
@@ -226,6 +227,46 @@ function createTestExtensionContext(sessionRef: SessionRef): ExtensionContext {
     getSystemPrompt: () => "",
   };
 }
+/* ============ MCP 配置信任链辅助（安全审核 F-29/MCP-1） ============ */
+
+function mcpConfigPath(agentDir: string): string {
+  return path.join(agentDir, "mcp-servers.json");
+}
+
+function mcpConfigSha256(agentDir: string): string | null {
+  try {
+    return createHash("sha256").update(readFileSync(mcpConfigPath(agentDir))).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
+function readStoredMcpHash(): string | null {
+  try {
+    return JSON.parse(readFileSync(path.join(configuredUserDataDir, "mcp-config-hash.json"), "utf-8")).sha256 ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function recordMcpHash(agentDir: string): void {
+  const sha = mcpConfigSha256(agentDir);
+  if (!sha) return;
+  try {
+    writeFileSync(path.join(configuredUserDataDir, "mcp-config-hash.json"), JSON.stringify({ sha256: sha }, null, 2), "utf-8");
+  } catch { /* 记录失败：下次启动会再次 TOFU，无害 */ }
+}
+
+/** 解析现有 MCP 配置（供保存前 diff；解析失败返回 null） */
+function readCurrentMcpServers(agentDir: string): Record<string, { command: string; args?: string[] }> | null {
+  try {
+    const raw = JSON.parse(readFileSync(mcpConfigPath(agentDir), "utf-8"));
+    return raw.servers ?? raw;
+  } catch {
+    return null;
+  }
+}
+
 const OPEN_FOLDER_MENU_ITEM_ID = "file.open-folder";
 const CHECK_FOR_UPDATES_MENU_ITEM_ID = "app.check-for-updates";
 const QUIT_FLUSH_TIMEOUT_MS = 5_000;
@@ -1126,10 +1167,44 @@ app.whenReady().then(async () => {
   const orchestrationRuntimeBridge = createStoreBackedOrchestrationRuntimeBridge();
   // MCP 扩展（异步初始化，读取 ~/.pi/agent/mcp-servers.json + 启动子进程）
   const mcpAgentDir = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".pi", "agent");
-  const mcpExtension = await createMcpExtension(mcpAgentDir).catch(() => null);
+  // F-29/MCP-1 信任链：配置 hash 与上次 UI 保存的基准不一致 = 应用外被修改
+  // （外部编辑/Agent 文件工具写入）。fail-closed：本次会话不加载 MCP 扩展，
+  // 用户到 设置→MCP 检查保存（重新确认+记录新基准）后恢复。
+  const mcpTampered = (() => {
+    const current = mcpConfigSha256(mcpAgentDir);
+    if (!current) return false; // 无配置文件 → 无可执行内容
+    const stored = readStoredMcpHash();
+    if (!stored) {
+      recordMcpHash(mcpAgentDir); // 首次见到该文件（TOFU）：记录基准
+      return false;
+    }
+    return current !== stored;
+  })();
+  if (mcpTampered) {
+    console.warn("[mcp] mcp-servers.json 在应用外被修改，本次会话停用 MCP 扩展（fail-closed）");
+    try {
+      new Notification({
+        title: "Workecho：MCP 扩展已停用",
+        body: "检测到 MCP 配置在应用外被修改。请到 设置 → MCP 扩展 检查后保存以恢复。",
+      }).show();
+    } catch { /* 通知不可用忽略 */ }
+  }
+  const mcpExtension = await (mcpTampered ? Promise.resolve(null) : createMcpExtension(mcpAgentDir)).catch(() => null);
   registerAppDialogResultIpc();
   // 注意：costrictDir 必须在下方自愈 IIFE 之前声明（曾因 TDZ 报 Cannot access before initialization）
   const costrictDir = path.join(configuredUserDataDir, "costrict");
+  // 安全审核 CS-3：apiKey 用系统凭据保护（Win DPAPI / Mac Keychain）加密落盘。
+  // 不可用时回退明文（保持功能可用）；存量明文 key 在此立即迁移为加密形态。
+  if (safeStorage.isEncryptionAvailable()) {
+    setCostrictSecretCodec({
+      encode: (plain) => safeStorage.encryptString(plain).toString("base64"),
+      decode: (encoded) => safeStorage.decryptString(Buffer.from(encoded, "base64")),
+    });
+    try {
+      const rawState = JSON.parse(readFileSync(path.join(costrictDir, "state.json"), "utf-8"));
+      if (typeof rawState.apiKey === "string") costrictWriteState(costrictDir, {}); // 明文 → 加密
+    } catch { /* 无 state.json 或解析失败：无需迁移 */ }
+  }
 
   // CoStrict 服务自愈：已接入（key 已存）但本地代理未运行时，启动时自动拉起。
   // 否则应用/系统重启后 127.0.0.1:14567 不在，所有 costrict 模型请求静默失败。
@@ -1401,8 +1476,21 @@ app.whenReady().then(async () => {
   // 保存 MCP server 配置
   ipcMain.handle("workbench:save-mcp-config", async (_event, servers: Record<string, any>) => {
     const agentDir = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".pi", "agent");
-    const mcpConfigPath = path.join(agentDir, "mcp-servers.json");
-    writeFileSync(mcpConfigPath, JSON.stringify({ servers }, null, 2), "utf-8");
+    // F-29：MCP 配置 = 可执行命令清单。保存前展示新增/变更的启动项，确认才落盘
+    const changes = summarizeMcpChanges(readCurrentMcpServers(agentDir), servers);
+    if (changes.length > 0) {
+      const r = await showAppDialog(mainWindow, {
+        kind: "confirm",
+        danger: true,
+        message: "确认保存 MCP 服务器配置？",
+        detail: "保存后 Agent 运行时将可启动以下进程：\n\n" + changes.join("\n"),
+        confirmText: "保存",
+        cancelText: "取消",
+      });
+      if (!r?.ok) return false;
+    }
+    writeFileSync(mcpConfigPath(agentDir), JSON.stringify({ servers }, null, 2), "utf-8");
+    recordMcpHash(agentDir);
     // P1-a 热加载：MCP 变更后刷新运行时
     try {
       const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);

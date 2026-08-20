@@ -36,6 +36,48 @@ interface McpTool {
 
 let rpcId = 0;
 
+/**
+ * 子进程环境白名单：不再全量继承 process.env——Electron 主进程环境含大量
+ * 应用自有变量，且恶意配置可用 env 覆写 PATH 劫持 command 解析（安全审核 MCP-1）。
+ * 用户自定义 env 在白名单之后应用，可显式覆盖。
+ */
+const SAFE_ENV_KEYS = new Set([
+  "PATH", "Path", "PATHEXT", "SystemRoot", "SystemDrive", "ComSpec", "TEMP", "TMP",
+  "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "ProgramFiles", "ProgramData",
+  "windir", "LANG", "LC_ALL", "TZ", "TERM", "SHELL", "XDG_CONFIG_HOME",
+]);
+
+export function buildSpawnEnv(configEnv?: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of Object.keys(process.env)) {
+    if (SAFE_ENV_KEYS.has(key)) env[key] = process.env[key];
+  }
+  return { ...env, ...configEnv };
+}
+
+/**
+ * 生成"保存后将新增/变更的进程启动项"摘要（供保存确认弹窗展示）。
+ * 仅删除的条目不产生摘要行——删除不会新增可执行内容，无需确认。
+ */
+export function summarizeMcpChanges(
+  current: Record<string, { command: string; args?: string[] }> | null,
+  next: Record<string, unknown>,
+): string[] {
+  const lines: string[] = [];
+  for (const [name, cfgRaw] of Object.entries(next ?? {})) {
+    const cfg = cfgRaw as { command?: string; args?: string[] } | null | undefined;
+    if (!cfg || typeof cfg.command !== "string" || !cfg.command) continue;
+    const cmdline = [cfg.command, ...(cfg.args ?? [])].join(" ");
+    const prev = current?.[name];
+    if (!prev) {
+      lines.push(`+ ${name}: ${cmdline}`);
+    } else if (prev.command !== cfg.command || JSON.stringify(prev.args ?? []) !== JSON.stringify(cfg.args ?? [])) {
+      lines.push(`~ ${name}: ${cmdline}`);
+    }
+  }
+  return lines;
+}
+
 /** 读取 MCP server 配置 */
 function readMcpConfig(agentDir: string): Record<string, McpServerConfig> {
   const configPath = path.join(agentDir, "mcp-servers.json");
@@ -58,7 +100,7 @@ class McpConnection {
   constructor(config: McpServerConfig) {
     this.proc = spawn(config.command, config.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...config.env },
+      env: buildSpawnEnv(config.env),
     });
 
     this.proc.stdout?.on("data", (chunk) => {
