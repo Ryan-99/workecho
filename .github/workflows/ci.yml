@@ -30,6 +30,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Wiki unit tests (Workecho 228-case suite)
+        run: pnpm --filter @pi-gui/desktop run test:unit
+
       - name: Driver unit tests
         run: pnpm --filter @pi-gui/pi-sdk-driver test
 
