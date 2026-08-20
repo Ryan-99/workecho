@@ -121,8 +121,26 @@ export function patchWikiConfig(userDataDir: string, patch: Partial<WikiConfig>)
  * 工具/扩展用的同步读取：从默认 userDataDir 路径读取配置。
  * 业务逻辑中需要检查开关时调用此函数。
  */
+
+/**
+ * main 进程启动时注入的真实 userData 目录（app.getPath("userData")）。
+ * 不注入时（单测/无 Electron 环境）回退到平台启发式路径。
+ *
+ * 背景（安全审核 F-09，实际比审核评级更严重）：productName 是 Workecho，
+ * 打包后 app.getPath("userData") = Roaming/Workecho，而启发式返回
+ * Roaming/pi——设置页（走 configuredUserDataDir）与工具门控（走本函数）
+ * 读写两份不同配置，selfModifyPlugins 等开关在生产构建中形同虚设。
+ */
+let activeUserDataDir: string | null = null;
+
+/** main 启动时调用一次，把权威 userData 路径注入给所有同步读取点 */
+export function setActiveWikiUserDataDir(dir: string): void {
+  activeUserDataDir = dir || null;
+}
+
 /** 与 Electron userData 约定对齐的应用数据目录（跨平台）。所有同步读取配置的地方统一走这里。 */
 export function piUserDataDir(): string {
+  if (activeUserDataDir) return activeUserDataDir;
   const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
   // Win: AppData/Roaming/pi, Mac: ~/Library/Application Support/pi, Linux: $XDG_CONFIG_HOME/pi（默认 ~/.config/pi）
   if (process.platform === "darwin") return path.join(home, "Library", "Application Support", "pi");

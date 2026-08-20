@@ -39,7 +39,7 @@ import { getBusinessSummary, getCardData, readEntity, entityFile } from "./busin
 import { createMcpExtension } from "./mcp-client";
 import { readCardConfig, saveCardConfig, type CardConfig } from "./card-config";
 import { readTodoRules, writeTodoRules } from "./todo-rules";
-import { readWikiConfig, writeWikiConfig, patchWikiConfig, getActiveWikiConfig, type WikiConfig } from "./wiki-config";
+import { readWikiConfig, writeWikiConfig, patchWikiConfig, getActiveWikiConfig, setActiveWikiUserDataDir, type WikiConfig } from "./wiki-config";
 import { ensureScheduleFile, readScheduleRules, addScheduleRule, removeScheduleRule } from "./schedule-service";
 import { readSessionGroups, createGroup, removeGroup, assignSessionToGroup } from "./session-groups";
 import { listPlugins, removePlugin, createPlugin } from "./plugin-service";
@@ -1054,6 +1054,9 @@ app.setName("pi");
 
 const configuredUserDataDir = process.env.PI_APP_USER_DATA_DIR?.trim() || app.getPath("userData");
 app.setPath("userData", configuredUserDataDir);
+// 权威 userData 路径注入 wiki-config，工具门控/卡片配置等同步读取点
+// 与设置页 IPC 读写同一份文件（安全审核 F-09：此前两套路径在生产构建中分叉）
+setActiveWikiUserDataDir(configuredUserDataDir);
 // 默认 workspace 路径（userData/Workbench）。
 // 不自动创建——首次启动由引导页创建；已初始化则直接用。
 const defaultWorkspacePath = path.join(configuredUserDataDir, "Workbench");
