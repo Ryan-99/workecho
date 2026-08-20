@@ -1769,7 +1769,9 @@ app.whenReady().then(async () => {
           const sessionDir = path.join(agentDir, dir);
           if (!existsSync(sessionDir)) continue;
           for (const file of readdirSync(sessionDir)) {
-            if (file.includes(sessionId)) {
+            // 精确匹配：文件主名（首个 . 前）必须等于 sessionId，防止
+            // 子串碰撞误删其他会话文件（安全审核 F-36）
+            if (file.split(".")[0] === sessionId) {
               try { unlinkSync(path.join(sessionDir, file)); } catch {}
               console.log(`[delete-forever] 已删除: ${file}`);
             }
@@ -2286,11 +2288,6 @@ app.whenReady().then(async () => {
   });
 
   // Steering/FollowUp 模式 — 通过 session supervisor 设置
-  ipcMain.handle("workbench:set-steering-mode", async (_event, mode: string) => {
-    // steering 模式目前仅由 renderer 本地记忆，下次 run 组装消息时生效，
-    // 暂无主进程侧状态需要写入
-    return mode;
-  });
 
   // 待办排序规则：读取 / 保存
   ipcMain.handle("workbench:get-todo-rules", () => readTodoRules(configuredUserDataDir));

@@ -447,8 +447,6 @@ export interface PiDesktopApi {
   getSchemaInfo(): Promise<unknown>;
   setAutoCompact(enabled: boolean): Promise<unknown>;
   getAutoCompact(): Promise<boolean>;
-  setAutoRetry(enabled: boolean): Promise<unknown>;
-  setSteeringMode(mode: string): Promise<unknown>;
   getBusinessSummary(): Promise<unknown>;
   getCardData(): Promise<unknown>;
   getCards(): Promise<unknown>;

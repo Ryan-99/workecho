@@ -339,8 +339,6 @@ contextBridge.exposeInMainWorld("piApp", {
   exportSession: (format: "html" | "jsonl") => ipcRenderer.invoke("workbench:export-session", format) as Promise<string | null>,
   setAutoCompact: (enabled: boolean) => ipcRenderer.invoke("workbench:set-auto-compact", enabled),
   getAutoCompact: () => ipcRenderer.invoke("workbench:get-auto-compact") as Promise<boolean>,
-  setAutoRetry: (enabled: boolean) => ipcRenderer.invoke("workbench:set-auto-retry", enabled),
-  setSteeringMode: (mode: string) => ipcRenderer.invoke("workbench:set-steering-mode", mode),
   getContextUsage: () => ipcRenderer.invoke("workbench:get-context-usage"),
   getSessionTools: () => ipcRenderer.invoke("workbench:get-session-tools"),
   getSchemaInfo: () => ipcRenderer.invoke("workbench:get-schema-info"),

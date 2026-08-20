@@ -178,10 +178,6 @@ export function shouldFireRule(rule: ScheduleRule, now: Date, lastCheck: Date): 
   return false;
 }
 
-/**
- * 构建注入对话的提示文本。
- * Agent 读到后会主动执行 action。
- */
-export function buildSchedulePrompt(rule: ScheduleRule): string {
-  return `[定时触发: ${rule.name}]\n${rule.action}\n\n请执行上述操作，并在对话中主动汇报结果。`;
-}
+// buildSchedulePrompt 已删除：定时规则直接注入会话执行的路径从未接线，
+// 且 action 是自由文本、直接注入即定时提示注入执行器（安全审核 F-19）。
+// 将来实现定时执行时需重新设计（action 白名单/结构化任务，而非自由文本注入）。

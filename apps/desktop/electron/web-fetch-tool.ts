@@ -19,8 +19,8 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** 重定向上限 */
 const MAX_REDIRECTS = 5;
 
-/** 判断 IP 字符串是否属于禁止访问的内网/保留网段 */
-function isBlockedIp(ip: string): boolean {
+/** 判断 IP 字符串是否属于禁止访问的内网/保留网段（导出供单测） */
+export function isBlockedIp(ip: string): boolean {
   if (net.isIPv4(ip)) {
     const octets = ip.split(".").map(Number);
     const a = octets[0];
@@ -90,8 +90,8 @@ function timeoutSignal(external: AbortSignal | undefined): AbortSignal {
   return controller.signal;
 }
 
-/** 从 HTML 提取纯文本（简易：去标签+压缩空白） */
-function htmlToText(html: string): string {
+/** 从 HTML 提取纯文本（简易：去标签+压缩空白；导出供单测） */
+export function htmlToText(html: string): string {
   return html
     // 去 script/style（含未闭合的起始标签到文件尾，降低残留注入面）
     .replace(/<script[\s\S]*?<\/script>/gi, "")

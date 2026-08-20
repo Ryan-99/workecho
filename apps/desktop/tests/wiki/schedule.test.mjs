@@ -16,7 +16,6 @@ import {
   addScheduleRule,
   removeScheduleRule,
   shouldFireRule,
-  buildSchedulePrompt,
   ensureScheduleFile,
 } from "../../electron/schedule-service.ts";
 import { makeTempWorkspace, cleanupWorkspace, readFile, exists } from "./helpers.mjs";
@@ -108,11 +107,3 @@ test("shouldFireRule: disabled 规则不触发", () => {
   assert.ok(!shouldFireRule(rule, now, new Date("2026-08-12T08:00:00")));
 });
 
-/* ===== buildSchedulePrompt ===== */
-
-test("buildSchedulePrompt: 生成注入对话的提示", () => {
-  const rule = { id: "r1", name: "每日早报", enabled: true, trigger: { type: "every", time: "09:00" }, action: "查询今日待办+维保到期，生成早报" };
-  const prompt = buildSchedulePrompt(rule);
-  assert.match(prompt, /每日早报/);
-  assert.match(prompt, /待办|维保/);
-});
