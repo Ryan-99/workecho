@@ -366,7 +366,7 @@ let cachedToolTokens: number | null = null;
 function estimateToolDefinitionTokens(): number {
   if (cachedToolTokens == null) {
     try {
-      const tools = createBusinessTools() as Array<Record<string, unknown>>;
+      const tools = createBusinessTools() as unknown as Array<Record<string, unknown>>;
       cachedToolTokens = Math.ceil(
         tools.reduce(
           (sum, t) => sum + JSON.stringify({ name: t.name, description: t.description, parameters: t.parameters }).length,
@@ -1732,7 +1732,7 @@ app.whenReady().then(async () => {
       let real = false;
       let sessionTotalTokens: number | null = null;
       try {
-        const realUsage = await store.driver.runtimeSupervisor.getRealUsage({ workspaceId: ws.id, sessionId: session.id });
+        const realUsage = await store.driver.getRealUsage({ workspaceId: ws.id, sessionId: session.id });
         if (realUsage?.context && realUsage.context.tokens != null) {
           const total = realUsage.context.tokens;
           msgTokens = Math.max(0, total - sysTokens - toolTokens);

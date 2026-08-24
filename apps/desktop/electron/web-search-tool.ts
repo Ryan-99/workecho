@@ -38,9 +38,10 @@ export function parseDuckDuckGoHtml(html: string): WebSearchResult[] {
   const linkRe = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
   const snippetRe = /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
   const snippets: string[] = [];
-  for (const s of html.matchAll(snippetRe)) snippets.push(htmlToText(s[1]));
+  for (const s of html.matchAll(snippetRe)) { if (s[1]) snippets.push(htmlToText(s[1])); }
   let idx = 0;
   for (const m of html.matchAll(linkRe)) {
+    if (!m[1] || !m[2]) continue;
     const title = htmlToText(m[2]);
     const url = decodeDdgHref(m[1]);
     if (!title || !url) continue;

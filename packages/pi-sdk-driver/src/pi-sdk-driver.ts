@@ -164,6 +164,11 @@ export class PiSdkDriver implements SessionDriver {
     return this.supervisor.getTranscript(sessionRef);
   }
 
+  /** 真实 token 用量转发（上下文占用 + 会话累计，会话未运行返回 null） */
+  getRealUsage(sessionRef: SessionRef) {
+    return this.supervisor.getRealUsage(sessionRef);
+  }
+
   getSessionSchemaInfo(sessionRef: SessionRef) {
     return this.supervisor.getSessionSchemaInfo(sessionRef);
   }
