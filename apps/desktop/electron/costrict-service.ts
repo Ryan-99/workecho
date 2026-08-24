@@ -13,7 +13,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSync, renameSync } from "node:fs";
 import path from "node:path";
 
 export const PROVIDER_ID = "costrict";
@@ -29,7 +29,17 @@ const GITHUB_REPO = "mokeyjay/costrict-router";
  * 查询：下载资产后 sha256sum，或 GitHub Release 页官方 checksums。
  */
 const PINNED_SHA256: Record<string, string> = {
-  // 例: "v1.2.3/costrict-router_windows_amd64.zip": "<sha256>",
+  // 下载资产 pin：新版本发布后在此追加即可强制校验；
+  // 未列出的版本走 TOFU（首次记录、防事后替换）。
+};
+
+/**
+ * S-09/C-10：随包分发二进制（resources/costrict/windows-x64/）的实测 sha256。
+ * installBundledBinary 在复制前校验——打包内容被篡改/损坏时拒绝安装并走下载兜底，
+ * 不再是纯 TOFU。升级二进制时同步更新此值。
+ */
+const BUNDLED_BINARY_SHA256: Record<string, string> = {
+  "windows-x64": "16e92a0af86b30592248fe648ea286d92866a62f4133ac9cd8db5c72064f43a2",
 };
 
 /** 托管目录里的二进制文件名（跨平台） */
@@ -62,6 +72,21 @@ export function installBundledBinary(opts: { resourcesDir: string; dir: string }
   if (!key) return false;
   const bundled = path.join(opts.resourcesDir, "costrict", key, binaryName());
   if (!existsSync(bundled)) return false;
+  // S-09：复制前校验随包二进制哈希（已知 pin 的平台）；不匹配/读不出 →
+  // 拒绝安装并返回 false 走 GitHub 下载兜底，不静默安装可疑内容
+  const expectedSha = BUNDLED_BINARY_SHA256[key];
+  if (expectedSha) {
+    try {
+      const actual = createHash("sha256").update(readFileSync(bundled)).digest("hex");
+      if (actual !== expectedSha) {
+        console.error(`[costrict] 随包二进制哈希不匹配（${key}），跳过内置安装走下载兜底`);
+        return false;
+      }
+    } catch (error) {
+      console.error("[costrict] 随包二进制读取失败，走下载兜底:", (error as Error).message);
+      return false;
+    }
+  }
   const target = managedBinaryPath(opts.dir);
   if (existsSync(target)) return true; // 已安装
   mkdirSync(opts.dir, { recursive: true });
@@ -154,10 +179,22 @@ interface CostrictStateOnDisk extends CostrictState {
 }
 
 export function readState(dir: string): CostrictState {
+  const stateFile = path.join(dir, STATE_FILE);
   let raw: CostrictStateOnDisk;
   try {
-    raw = JSON.parse(readFileSync(path.join(dir, STATE_FILE), "utf-8"));
-  } catch {
+    raw = JSON.parse(readFileSync(stateFile, "utf-8"));
+  } catch (error) {
+    // B-11：state.json 损坏（非缺失）时先把残骸改名保留再返回 {}——
+    // 否则下一次 writeState 会把 apiKey/TOFU 一并抹掉且无从恢复
+    if (existsSync(stateFile)) {
+      const corruptBak = `${stateFile}.corrupt-${Date.now().toString(36)}.bak`;
+      try {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          copyFileSync(stateFile, corruptBak);
+          console.error(`[costrict] state.json 损坏，已备份到 ${corruptBak}（一次性 key 若在其中需 key reset 重新登录）`);
+        }
+      } catch { /* 备份失败不阻断 */ }
+    }
     return {};
   }
   const state: CostrictState = { ...raw };
@@ -183,10 +220,27 @@ export function writeState(dir: string, patch: CostrictState): CostrictState {
       delete disk.apiKey;
     } catch {
       // 加密失败 → 保留明文字段（功能可用性优先，仅退化到旧行为）
+      console.warn("[costrict] safeStorage 加密失败，apiKey 将以明文落盘（功能优先降级）");
     }
   }
   if (next.apiKey === undefined) delete disk.apiKey;
-  writeFileSync(path.join(dir, STATE_FILE), JSON.stringify(disk, null, 2), "utf-8");
+  // B-11：tmp+rename 原子替换——writeFileSync 中途崩溃/AV 干扰产生半截 JSON 后，
+  // readState 会把它当损坏清空，一次性 apiKey 与下载 TOFU 记录随之丢失
+  const target = path.join(dir, STATE_FILE);
+  const tmp = `${target}.${process.pid}.${Date.now().toString(36)}.tmp`;
+  writeFileSync(tmp, JSON.stringify(disk, null, 2), "utf-8");
+  try {
+    renameSync(tmp, target);
+  } catch {
+    // Windows 占用退路：移走目标再换名（同 atomic-file-write 策略）
+    try {
+      if (existsSync(target)) rmSync(target, { force: true });
+      renameSync(tmp, target);
+    } catch (fallbackError) {
+      try { rmSync(tmp, { force: true }); } catch { /* ignore */ }
+      throw fallbackError;
+    }
+  }
   return next;
 }
 

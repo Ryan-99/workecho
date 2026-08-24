@@ -10,10 +10,11 @@
  * createPolicyExtension 返回 ExtensionFactory，注册 pi 事件钩子。
  */
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { PI_EVENTS, type ExtensionFactory } from "./pi-compat";
 import { appendToLog } from "./wiki-manager";
 import { getActiveWikiConfig } from "./wiki-config";
-import { readHookRules, matchHookRules } from "./hooks-service";
+import { readHookRules, matchHookRules, hooksPath } from "./hooks-service";
 import { isPlanMode, isMutationTool, PLAN_MODE_VETO_REASON } from "./plan-mode";
 
 /** Hook 通知器：由 main.ts 注入（Electron Notification）。策略层不直接依赖 electron，测试可注入 mock。 */
@@ -48,6 +49,8 @@ const WRITE_FILE_TOOLS = new Set(["write", "edit", "edit-diff"]);
 export function isProtectedConfigPath(params: Record<string, unknown>, cwd: string): boolean {
   const workspaceTargets = [
     path.resolve(cwd, "workbench/wiki/hooks.md"),
+    path.resolve(cwd, "workbench/wiki/schedule.md"),
+    path.resolve(cwd, "workbench/wiki/log.md"),
     path.resolve(cwd, "AGENTS.md"),
   ];
   const check = (v: unknown): boolean => {
@@ -94,6 +97,11 @@ export function isDangerousOp(toolName: string, params: Record<string, unknown>)
   }
   // wiki_update_page 修改状态/金额等关键字段
   if (toolName === "wiki_update_page") {
+    // B-01：按标题更新管控文件（hooks/schedule/log）同样属于改写安全管控
+    const title = String(params.title ?? "").trim().toLowerCase();
+    if (title === "hooks" || title === "schedule" || title === "log") {
+      return true;
+    }
     const updates = params.frontmatterUpdates as Record<string, unknown> | undefined;
     if (updates && (updates.status !== undefined || updates.amount !== undefined)) {
       return true;
@@ -104,8 +112,22 @@ export function isDangerousOp(toolName: string, params: Record<string, unknown>)
   if (toolName === "wiki_update_memory") {
     return params.mode === "replace";
   }
+  // B-01：在 memory/ 下新建页面同样进入持久化注入面（user-profile 等
+  // 既有页的覆写已由 createWikiPage 的存在检查拒绝），一律确认
+  if (toolName === "wiki_create_page") {
+    const category = String(params.category ?? "").replace(/\\/g, "/").trim().toLowerCase();
+    return category === "memory" || category.startsWith("memory/");
+  }
   // 知识扫描显式指定目录（默认目录扫描视为常规初始化）
   if (toolName === "init_scan" && typeof params.scanDir === "string" && params.scanDir.trim()) {
+    return true;
+  }
+  // B-03：读取工作区外目录进知识库的等价路径统一走确认——
+  // wiki_import_legacy（任意 sourceDir）与 init_workspace 显式 scanDir 此前可旁路 init_scan 的门
+  if (toolName === "wiki_import_legacy") {
+    return true;
+  }
+  if (toolName === "init_workspace" && typeof params.scanDir === "string" && params.scanDir.trim()) {
     return true;
   }
   return false;
@@ -123,7 +145,8 @@ function redactParams(params: Record<string, unknown>): string {
     for (const [k, v] of Object.entries(params)) {
       safe[k] = SENSITIVE_KEY_RE.test(k) ? "***" : v;
     }
-    return JSON.stringify(safe).slice(0, 80);
+    // B-18：80 字符会把 update_entity 的具体改动值截掉，放宽到 200
+    return JSON.stringify(safe).slice(0, 200);
   } catch {
     return "(unserializable)";
   }
@@ -140,7 +163,9 @@ export function auditToolCall(
     const paramStr = redactParams(params);
     appendToLog(workspaceDir, `tool_call | ${toolName} | ${paramStr}`);
   } else {
-    const success = result && typeof result === "object" && !((result as Record<string, unknown>).error);
+    // B-18：pi 的工具结果常是 content-block 数组（无 error 字段），恒被判成
+    // success——调用方应显式传 isError（见 postExecute）
+    const success = result === true || (result && typeof result === "object" && !((result as Record<string, unknown>).error));
     appendToLog(workspaceDir, `tool_result | ${toolName} | ${success ? "success" : "check"}`);
   }
 }
@@ -188,8 +213,29 @@ export function postExecute(
   toolName: string,
   params: Record<string, unknown>,
   result: unknown,
+  isError?: boolean,
 ): void {
-  auditToolCall(workspaceDir, toolName, params, result, "result");
+  if (isError === true) {
+    appendToLog(workspaceDir, `tool_result | ${toolName} | error`);
+    return;
+  }
+  auditToolCall(workspaceDir, toolName, params, isError === false ? true : result, "result");
+}
+
+/** 危险操作/受保护路径命中的确认弹窗文案（供 handler 与 preExecute 共用） */
+export function describeDangerousOp(
+  workspaceDir: string,
+  toolName: string,
+  params: Record<string, unknown>,
+): string | undefined {
+  if (isDangerousOp(toolName, params)) {
+    const type = String(params.type ?? params.title ?? params.category ?? "");
+    return `即将修改关键数据：${toolName}${type ? `（${type}）` : ""}。确认执行？`;
+  }
+  if (WRITE_FILE_TOOLS.has(toolName) && isProtectedConfigPath(params, workspaceDir)) {
+    return "Agent 正在写入受保护配置文件（hooks.md / schedule.md / log.md / AGENTS.md / mcp-servers.json）。这类文件控制安全策略，确认允许修改？";
+  }
+  return undefined;
 }
 
 /**
@@ -236,7 +282,19 @@ export function createPolicyExtension(): ExtensionFactory {
           }
         }
         return { block: blocked, reason, ...(terminate ? { terminate: true } : {}) };
-      } catch {
+      } catch (error) {
+        // B-05：Hook 读取/匹配异常不能静默 fail-open。规则文件存在却读不出来，
+        // 说明用户的拦截意图状态未知（EPERM/损坏），按 fail-closed 拦下并留证据。
+        try {
+          console.error("[tool-pipeline] applyHooks 异常:", error);
+          appendToLog(cwd, `hook_error | ${event} | ${toolName} | ${(error as Error).message}`);
+        } catch { /* 日志失败忽略 */ }
+        if (existsSync(hooksPath(cwd))) {
+          return {
+            block: true,
+            reason: "Hook 规则文件存在但无法读取（可能被占用或损坏），已按拦截处理；请检查 workbench/wiki/hooks.md",
+          };
+        }
         return { block: false };
       }
     };
@@ -252,22 +310,23 @@ export function createPolicyExtension(): ExtensionFactory {
             appendToLog(cwd, `plan_mode_block | ${event.toolName}`);
             return { block: true, reason: PLAN_MODE_VETO_REASON };
           }
-          // 审计管道受 pipelineEnabled 门控；Hook 规则独立（仅受 hooksEnabled 门控，在 applyHooks 内检查）
+          // B-04：审计日志受 pipelineEnabled 门控；危险操作确认与受保护路径检查
+          // 是独立的安全开关（dangerousOpConfirm），关闭"审计管道"不应连带
+          // 关闭确认门（此前二者捆绑，pipelineEnabled=false 会把确认门整个架空）
           if (!config || config.pipelineEnabled) {
-            const pre = preExecute(cwd, event.toolName, event.input);
-            // P2 补全：危险操作确认（dangerousOpConfirm 配置生效）。
+            auditToolCall(cwd, event.toolName, event.input);
+          }
+          const dangerousDescription = describeDangerousOp(cwd, event.toolName, event.input);
+          if (dangerousDescription && config?.dangerousOpConfirm !== false) {
             // fail-closed：命中危险操作但确认器不可用时拒绝执行，而非静默放行（安全审核 TP-1）
-            if (pre.dangerous && config?.dangerousOpConfirm !== false) {
-              if (!dangerousConfirmer) {
-                appendToLog(cwd, `dangerous_op | ${event.toolName} | blocked(no-confirmer)`);
-                return { block: true, reason: "危险操作需要用户确认，但确认器不可用；请在应用内重试" };
-              }
-              const desc = pre.dangerousDescription ?? `${event.toolName} ${JSON.stringify(event.input).slice(0, 80)}`;
-              const approved = await dangerousConfirmer("危险操作确认", desc);
-              appendToLog(cwd, `dangerous_op | ${event.toolName} | ${approved ? "approved" : "rejected"}`);
-              if (!approved) {
-                return { block: true, reason: "用户拒绝了危险操作" };
-              }
+            if (!dangerousConfirmer) {
+              appendToLog(cwd, `dangerous_op | ${event.toolName} | blocked(no-confirmer)`);
+              return { block: true, reason: "危险操作需要用户确认，但确认器不可用；请在应用内重试" };
+            }
+            const approved = await dangerousConfirmer("危险操作确认", dangerousDescription);
+            appendToLog(cwd, `dangerous_op | ${event.toolName} | ${approved ? "approved" : "rejected"}`);
+            if (!approved) {
+              return { block: true, reason: "用户拒绝了危险操作" };
             }
           }
           const { block, reason, terminate } = applyHooks(cwd, "tool_call", event.toolName);
@@ -285,7 +344,8 @@ export function createPolicyExtension(): ExtensionFactory {
           const config = getConfig();
           const cwd = ctx?.cwd ?? (pi as any).cwd ?? process.cwd();
           if (!config || config.pipelineEnabled) {
-            postExecute(cwd, event.toolName, {}, event.content);
+            // B-18：把 pi 的 isError 传下去，失败结果不再被记成 success
+            postExecute(cwd, event.toolName, {}, event.content, event.isError);
           }
           applyHooks(cwd, "tool_result", event.toolName);
         } catch {

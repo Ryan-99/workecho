@@ -9,9 +9,9 @@
  * 存 workbench/wiki/hooks.md（JSON 代码块，同 schedule.md 模式），Agent 也可读写。
  * 由 tool-pipeline 在事件触发时读取并执行。
  */
-import { existsSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { wikiRoot, appendToLog } from "./wiki-manager";
+import { wikiRoot, appendToLog, writeWikiFileSync } from "./wiki-manager";
 
 /** 支持的事件类型（首批接入，可扩展） */
 export const HOOK_EVENTS = ["tool_call", "tool_result", "session_start", "agent_end"] as const;
@@ -34,7 +34,7 @@ export interface HookRule {
 
 const HOOKS_FILE = "hooks.md";
 
-function hooksPath(workspaceDir: string): string {
+export function hooksPath(workspaceDir: string): string {
   return path.join(wikiRoot(workspaceDir), HOOKS_FILE);
 }
 
@@ -43,7 +43,7 @@ export function ensureHooksFile(workspaceDir: string): void {
   const p = hooksPath(workspaceDir);
   if (!existsSync(p)) {
     const today = new Date().toISOString().slice(0, 10);
-    writeFileSync(p, `---\ntitle: Hooks\ntype: hooks\ncategory: hooks\ncreated: ${today}\nupdated: ${today}\n---\n\n# Hooks\n\n> 事件规则：到匹配的事件发生时执行动作（记日志/通知/阻止）。Agent 可读写。\n\n`, "utf-8");
+    writeWikiFileSync(p, `---\ntitle: Hooks\ntype: hooks\ncategory: hooks\ncreated: ${today}\nupdated: ${today}\n---\n\n# Hooks\n\n> 事件规则：到匹配的事件发生时执行动作（记日志/通知/阻止）。Agent 可读写。\n\n`, "utf-8");
     appendToLog(workspaceDir, "create | hooks.md | Hooks 初始化");
   }
 }
@@ -75,7 +75,7 @@ function writeHookRules(workspaceDir: string, rules: HookRule[]): void {
   for (const r of rules) {
     body += `## ${r.name}\n\n\`\`\`json\n${JSON.stringify(r, null, 2)}\n\`\`\`\n\n`;
   }
-  writeFileSync(hooksPath(workspaceDir), `---\ntitle: Hooks\ntype: hooks\ncategory: hooks\nupdated: ${today}\n---\n${body}`, "utf-8");
+  writeWikiFileSync(hooksPath(workspaceDir), `---\ntitle: Hooks\ntype: hooks\ncategory: hooks\nupdated: ${today}\n---\n${body}`, "utf-8");
 }
 
 /** 添加规则（可指定固定 id 实现 upsert）。校验失败返回 null。 */

@@ -98,7 +98,8 @@ const appTestMode = resolveAppTestMode(process.env.PI_APP_TEST_MODE);
 const windowTestMode = appTestMode ?? "foreground";
 const devReloadMarkersEnabled = process.env.PI_APP_DEV_RELOAD_MARKERS === "1";
 // dev 诊断：PI_APP_CDP=1 时开 CDP 端口（http://127.0.0.1:9223/json）
-if (process.env.PI_APP_CDP === "1") {
+// S-08：仅开发构建生效——打包产物不应存在无认证 CDP 后门
+if (process.env.PI_APP_CDP === "1" && !app.isPackaged) {
   app.commandLine.appendSwitch("remote-debugging-port", "9223");
 }
 let store: DesktopAppStore;
@@ -1475,9 +1476,18 @@ app.whenReady().then(async () => {
   });
   // 默认工作目录路径（给引导页显示）
   ipcMain.handle("workbench:get-default-path", () => defaultWorkspacePath);
-  // 首次启动检测：workspace 已初始化（.workbench-initialized 存在）则不弹引导
+  // 首次启动检测：默认 workspace 已初始化，或 store 里已注册过任何工作区
+  // （含 PI_APP_INITIAL_WORKSPACES 注入 / 引导页选过 / 驱动目录记忆的），都不弹引导。
+  // F-04：此前只认默认路径的 sentinel，注入工作区的启动被误判为首启，应用卡在引导页。
   ipcMain.handle("workbench:needs-onboarding", () => {
-    return !existsSync(path.join(defaultWorkspacePath, ".workbench-initialized"));
+    if (existsSync(path.join(defaultWorkspacePath, ".workbench-initialized"))) return false;
+    try {
+      const st = store.state;
+      const registered = (st?.workspaces ?? []).filter((w) => w.path !== defaultWorkspacePath);
+      return registered.length === 0;
+    } catch {
+      return true;
+    }
   });
   // 首次启动引导：选择工作目录（弹原生文件夹选择器）
   ipcMain.handle("onboarding:pick-workspace", async () => {
@@ -1490,6 +1500,20 @@ app.whenReady().then(async () => {
   });
   // 确认工作目录：把选定目录注册为 workspace + 初始化 workbench 结构
   ipcMain.handle("onboarding:confirm-workspace", async (_event, workspacePath: string) => {
+    // S-04：路径来自渲染层——必须是已存在的真实目录，防止被滥用为
+    // "任意路径写 AGENTS.md"（文件/不存在的路径一律拒绝）
+    if (typeof workspacePath !== "string" || !workspacePath.trim()) {
+      throw new Error("无效的工作目录");
+    }
+    let stat: { isDirectory(): boolean } | null = null;
+    try {
+      stat = statSync(workspacePath);
+    } catch {
+      stat = null;
+    }
+    if (!stat || !stat.isDirectory()) {
+      throw new Error(`工作目录不存在或不是目录: ${workspacePath}`);
+    }
     initWorkspaceDir(workspacePath);  // 确保 workbench 子目录存在（幂等）
     const prompt = readBusinessPrompt(configuredUserDataDir);
     syncPromptToWorkspace(workspacePath, prompt);
@@ -2889,7 +2913,17 @@ function registerAppDialogResultIpc(): void {
 function createRuntimeLoginCallbacks(window?: BrowserWindow | null) {
   return {
     onAuth: async ({ url, instructions }: { readonly url: string; readonly instructions?: string }) => {
-      await shell.openExternal(url);
+      // S-03：上游 OAuth 回调 URL 未校验协议即 openExternal——只放行 http(s)
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+          throw new Error(`非 http(s) 协议: ${parsed.protocol}`);
+        }
+        await shell.openExternal(parsed.toString());
+      } catch (error) {
+        console.error("[auth] 拒绝打开登录链接:", (error as Error).message, url);
+        return;
+      }
       if (instructions?.trim()) {
         await showLoginInstructions(window, instructions.trim());
       }

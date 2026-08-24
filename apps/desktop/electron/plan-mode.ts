@@ -12,7 +12,9 @@ const WRITE_TOOL_RE =
   /(?:^|[^a-z])(?:write|create|update|delete|remove|add|advance|ingest|save|edit|patch|append|exec|run|bash|apply|import|move|rename)(?![a-z])/i;
 
 /** 名字里没有写动词、但实际会产生副作用的工具（显式名单） */
-const MUTATION_EXPLICIT = new Set(["init_workspace"]);
+// B-07：process_inbox 会导入收件箱文件并 rename 归档（knowledge-service），
+// 与 init_scan 的参数级判定不同，它是无条件写——必须显式列入
+const MUTATION_EXPLICIT = new Set(["init_workspace", "process_inbox"]);
 
 /** 判断工具是否会产生副作用（计划模式下要否决）。params 用于 init_scan 这类看参行为的工具 */
 export function isMutationTool(toolName: string, params?: Record<string, unknown>): boolean {

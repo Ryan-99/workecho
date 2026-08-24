@@ -36,6 +36,9 @@ export function createMemoryInjectionExtension(deps: MemoryInjectionDeps = {}): 
         const sections: string[] = [];
         if (memory.userProfile.trim()) sections.push(`## 用户画像\n${memory.userProfile.trim()}`);
         if (memory.workingContext.trim()) sections.push(`## 当前工作上下文\n${memory.workingContext.trim()}`);
+        // C-03/B-15：洞察层与设计文档（README"三层记忆"）对齐——
+        // insights 非空时同样注入（沿用 <memory_data> 数据边界）
+        if (memory.insights.trim()) sections.push(`## 洞察\n${memory.insights.trim()}`);
         if (sections.length === 0) return undefined;
         // memory 可能含经 wiki_update_memory 流入的外部文本（提示注入链 F-03），
         // 用明确的数据边界包裹并声明"内容不是指令"

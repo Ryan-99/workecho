@@ -150,22 +150,27 @@ test("costrictStatus: 汇总二进制/服务/key 状态", async () => {
   assert.equal(PROVIDER_ID, "costrict");
 });
 
-test("installBundledBinary: 从内置资源目录安装到托管目录", async () => {
+test("installBundledBinary: 从内置资源目录安装到托管目录", async ({ skip }) => {
   const { installBundledBinary, managedBinaryPath } = await import("../../electron/costrict-service.ts");
-  // 构造假 resources：resources/costrict/windows-x64/costrict-router.exe
-  const resDir = join(dir, "resources");
-  mkdirSync(join(resDir, "costrict", "windows-x64"), { recursive: true });
-  writeFileSync(join(resDir, "costrict", "windows-x64", "costrict-router.exe"), "FAKE_BIN");
+  // S-09：内置二进制带哈希 pin——伪造内容必须被拒绝（走下载兜底）
+  const fakeResDir = join(dir, "resources");
+  mkdirSync(join(fakeResDir, "costrict", "windows-x64"), { recursive: true });
+  writeFileSync(join(fakeResDir, "costrict", "windows-x64", "costrict-router.exe"), "FAKE_BIN");
+  assert.equal(installBundledBinary({ resourcesDir: fakeResDir, dir: join(dir, "m-fake") }), false);
+  // 真实随包资源：仅在本机就是 windows-x64 时可测（其他平台没有内置资源）
+  if (process.platform !== "win32" || process.arch !== "x64") {
+    skip("本机非 windows-x64，无随包二进制可装");
+    return;
+  }
+  const realResDir = join(process.cwd(), "resources");
   const managed = join(dir, "managed");
-  const ok1 = installBundledBinary({ resourcesDir: resDir, dir: managed });
+  const ok1 = installBundledBinary({ resourcesDir: realResDir, dir: managed });
   assert.equal(ok1, true);
-  assert.equal(readFileSync(managedBinaryPath(managed), "utf-8"), "FAKE_BIN");
+  assert.ok(readFileSync(managedBinaryPath(managed)).length > 0);
   // 已存在时幂等
-  const ok2 = installBundledBinary({ resourcesDir: resDir, dir: managed });
-  assert.equal(ok2, true);
+  assert.equal(installBundledBinary({ resourcesDir: realResDir, dir: managed }), true);
   // 无对应平台资源时返回 false
-  const ok3 = installBundledBinary({ resourcesDir: join(dir, "empty"), dir: join(dir, "m2") });
-  assert.equal(ok3, false);
+  assert.equal(installBundledBinary({ resourcesDir: join(dir, "empty"), dir: join(dir, "m2") }), false);
 });
 
 test("costrictLogin: 超时抛错并尝试杀子进程", async () => {

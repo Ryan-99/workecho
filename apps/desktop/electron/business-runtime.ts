@@ -10,14 +10,14 @@
  *
  * 数据读写函数复用 business-store.ts（和状态面板、scheduler 共享同一份逻辑）。
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { defineTool, toolOk as okResult, toolErr as errResult, cwdFromContext, assertPiExtensionApi, type ExtensionContext, type ExtensionFactory } from "./pi-compat";
 import { readEntity, listEntities, entityDir, entityFile, ENTITY_TYPES, stringifyFrontmatter, listEntityTypes } from "./business-store";
 import { processInbox, searchCases, previewScan, importFiles, getCommonDocDirs, scanDocs } from "./knowledge-service";
 import { createWebFetchTool } from "./web-fetch-tool";
 import { createWebSearchTool } from "./web-search-tool";
-import { appendToLog, regenerateIndex, createWikiPage, updateWikiPage, findPageByTitle, readMemory, updateMemory, lintWiki, addCrossReference, createGoal, advanceGoal, updateGoalStatus, getActiveGoals, ingestText, ingestDocuments, discoverDomains, searchWiki, saveSynthesis, importLegacyWiki } from "./wiki-manager";
+import { appendToLog, regenerateIndex, createWikiPage, updateWikiPage, findPageByTitle, readMemory, updateMemory, lintWiki, addCrossReference, createGoal, advanceGoal, updateGoalStatus, getActiveGoals, ingestText, ingestDocuments, discoverDomains, searchWiki, saveSynthesis, importLegacyWiki, writeWikiFileSync } from "./wiki-manager";
 import { readCardConfig, saveCardConfig } from "./card-config";
 import { getActiveWikiConfig, piUserDataDir } from "./wiki-config";
 import { addScheduleRule, readScheduleRules, removeScheduleRule } from "./schedule-service";
@@ -194,7 +194,7 @@ function createAddTodoTool() {
     if (dueDate) fm.dueDate = dueDate;
     fm.priority = params.priority ?? 3;
     const content = stringifyFrontmatter(fm);
-    writeFileSync(entityFile(cwd, "todos", id), content, "utf-8");
+    writeWikiFileSync(entityFile(cwd, "todos", id), content, "utf-8");
     appendToLog(cwd, `create_page | todos/${id}.md | ${params.title}`);
     regenerateIndex(cwd);
     return okResult(`已添加待办: ${params.title}${dueDate ? `（截止: ${dueDate}）` : ""} (id: ${id})`, { id, ...fm });
@@ -225,7 +225,7 @@ function createCreateEntityTool() {
     };
     mkdirSync(entityDir(cwd, params.type), { recursive: true });
     const content = stringifyFrontmatter(fm) + (params.body ? `\n${params.body}\n` : "\n");
-    writeFileSync(entityFile(cwd, params.type, id), content, "utf-8");
+    writeWikiFileSync(entityFile(cwd, params.type, id), content, "utf-8");
     appendToLog(cwd, `create_page | ${params.type}/${id}.md`);
     regenerateIndex(cwd);
     return okResult(`已创建 ${params.type}/${id}`, { id, type: params.type, frontmatter: fm });
@@ -248,7 +248,7 @@ function createUpdateEntityTool() {
     if (!existing) return errResult(`未找到实体: ${params.type}/${params.id}`);
     const updatedFm = { ...existing.frontmatter, ...params.updates, updated: new Date().toISOString().slice(0, 10) };
     const content = stringifyFrontmatter(updatedFm) + "\n" + existing.body + "\n";
-    writeFileSync(entityFile(cwd, params.type, params.id), content, "utf-8");
+    writeWikiFileSync(entityFile(cwd, params.type, params.id), content, "utf-8");
     appendToLog(cwd, `update_page | ${params.type}/${params.id}.md`);
     return okResult(`已更新 ${params.type}/${params.id}`, { id: params.id, type: params.type, frontmatter: updatedFm });
   });
@@ -377,7 +377,7 @@ function createCardTemplateTool() {
     for (const f of params.displayFields) {
       if (f !== "id" && f !== "title") fm[f] = params.fieldLabels?.[f] ?? f;
     }
-    writeFileSync(path.join(dir, `${sampleId}.md`), stringifyFrontmatter(fm) + "\n这是示例数据，请编辑或删除后添加真实数据。\n", "utf-8");
+    writeWikiFileSync(path.join(dir, `${sampleId}.md`), stringifyFrontmatter(fm) + "\n这是示例数据，请编辑或删除后添加真实数据。\n", "utf-8");
     // 更新卡片配置
     const userDataDir = piUserDataDir();
     const cards = readCardConfig(userDataDir);
@@ -428,7 +428,7 @@ function createRemoveCardTemplateTool() {
 /** wiki_create_page：在 wiki 中创建页面（统一入口） */
 function createWikiCreatePageTool() {
   return defineTool("wiki_create_page",
-    "在统一 Wiki 知识库中创建一个新页面。自动维护 index.md 和 log.md。适用于创建任何类型的 wiki 页面（实体/案例/概念/综合分析等）。", {
+    "在统一 Wiki 知识库中创建一个新页面。同名页面已存在时会拒绝（不覆写）——更新既有页面请用 wiki_update_page / update_entity。自动维护 index.md 和 log.md。适用于创建任何类型的 wiki 页面（实体/案例/概念/综合分析等）。", {
     type: "object",
     properties: {
       category: { type: "string", description: "wiki 类别（okr/todos/maintenance/ka/projects/knowledge/cases/knowledge/concepts/knowledge/synthesis/memory 或自定义类型）" },
@@ -440,6 +440,10 @@ function createWikiCreatePageTool() {
   }, async (_id, params: any, _signal, _onUpdate, ctx) => {
     const cwd = cwdFromContext(ctx);
     const result = createWikiPage(cwd, params.category, params.title, params.frontmatter ?? {}, params.body ?? "");
+    // B-01：create 永不覆写——存在即拒绝，引导走带确认门的更新工具
+    if (!result.created) {
+      return errResult(`页面已存在，未做任何修改: ${result.relPath}。要更新内容请用 wiki_update_page（append/frontmatter 更新），修改状态/金额等关键字段会触发用户确认。`);
+    }
     return okResult(`已创建 wiki 页面: ${result.relPath}`, result);
   });
 }
@@ -730,7 +734,7 @@ function createWikiSaveSynthesisTool() {
 
 function createWikiCreateScheduleTool() {
   return defineTool("wiki_create_schedule",
-    "创建一条定时规则。到时间时 Agent 主动在对话中执行 action 并汇报。支持每日定时(at 09:00)、每周定时(weekday+time)、事件触发(before_event N天前)。", {
+    "创建一条定时规则（存储到 wiki/schedule.md）。注意：当前版本的定时执行器尚未接线，规则只被保存和管理，不会自动触发——到时间的提醒由维保/待办提醒服务独立承担。支持每日定时(at 09:00)、每周定时(weekday+time)、事件触发(before_event N天前)。", {
     type: "object",
     properties: {
       name: { type: "string", description: "规则名称（如：每日早报）" },
@@ -757,7 +761,7 @@ function createWikiCreateScheduleTool() {
       },
       action: params.action,
     });
-    return okResult(`已创建定时规则"${params.name}"(${rule.id})。到时间时 Agent 会主动执行。`, rule);
+    return okResult(`已创建定时规则"${params.name}"(${rule.id})。注意：当前版本定时执行器尚未接线，规则已保存但不会自动触发。`, rule);
   });
 }
 
@@ -868,7 +872,7 @@ function createWikiListSkillsTool() {
 
 function createInitWorkspaceTool() {
   return defineTool("init_workspace",
-    "一键初始化整个工作环境（含知识库）：创建 wiki 结构+记忆模板+定时/hooks 配置，扫描电脑文档导入知识库（自动去重、不动原文件），分析高频领域词建议动态类型。幂等可重复执行。用户说'帮我初始化工作环境/初始化一下/设置好环境'这类表达时直接调用，不需要确认。", {
+    "一键初始化整个工作环境（含知识库）：创建 wiki 结构+记忆模板+定时/hooks 配置，扫描电脑文档导入知识库（自动去重、不动原文件），分析高频领域词建议动态类型。幂等可重复执行。用户说'帮我初始化工作环境/初始化一下/设置好环境'这类表达时直接调用；显式指定 scanDir 扫描指定目录时会请求用户确认。", {
     type: "object",
     properties: {
       scanDir: { type: "string", description: "要扫描的目录（可选，不填则自动扫描桌面/文档/下载+常用盘符）" },

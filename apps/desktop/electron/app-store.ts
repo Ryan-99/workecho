@@ -2664,7 +2664,10 @@ export class DesktopAppStore implements AppStoreInternals {
 
     this.persistUiStateTimer = setTimeout(() => {
       this.persistUiStateTimer = undefined;
-      void this.persistUiState();
+      // B-21：持久化失败（EPERM 等平台间歇错误）至少留下日志，不再完全静默
+      this.persistUiState().catch((error) => {
+        console.warn("[app-store] UI 状态持久化失败（下次变更将重试）:", (error as Error).message);
+      });
     }, 250);
   }
 

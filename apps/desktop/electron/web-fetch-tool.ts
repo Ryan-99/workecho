@@ -1,15 +1,20 @@
 /**
  * Web Fetch 工具：让 AI 能获取网页内容。
- * 用 Node 的 fetch 抓取 URL，提取纯文本（去 HTML 标签），截断返回。
+ * 用 Node 的 http/https 直连抓取 URL，提取纯文本（去 HTML 标签），截断返回。
  *
  * SSRF 防护（工具参数是模型可控的，URL 视为不可信输入）：
  * - 仅允许 http/https 协议；
  * - 禁止环回/私网/链路本地/云元数据地址（按字面量与 DNS 解析结果双重校验）；
- * - 重定向手动逐跳跟随，每一跳重新过校验；
+ * - S-01：校验通过的解析地址被"钉死"进实际连接（自定义 lookup 只返回
+ *   预校验 IP），消除"校验时解析到公网、连接时重绑到内网"的 TOCTOU；
+ * - 重定向手动逐跳跟随，每一跳重新解析+校验+钉死；
  * - 强制超时与响应体大小上限。
  */
 import { lookup } from "node:dns/promises";
 import net from "node:net";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import type { IncomingMessage } from "node:http";
 import { defineTool, toolOk as okResult, toolErr as errResult } from "./pi-compat";
 
 /** 请求总超时 */
@@ -49,8 +54,9 @@ export function isBlockedIp(ip: string): boolean {
   return true; // 无法识别的一律拒绝
 }
 
-/** 校验单个 URL：协议白名单 + 主机名/DNS 解析结果网段校验 */
-async function assertUrlAllowed(rawUrl: string): Promise<URL> {
+/** 校验单个 URL：协议白名单 + 主机名/DNS 解析结果网段校验。
+ * 返回预校验通过的地址（S-01：调用方必须把它钉进实际连接）。 */
+async function assertUrlAllowed(rawUrl: string): Promise<{ url: URL; address: string; family: number }> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -64,17 +70,53 @@ async function assertUrlAllowed(rawUrl: string): Promise<URL> {
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
     throw new Error(`不允许访问本机/内网主机: ${host}`);
   }
-  // 字面量 IP 直接查网段；域名先 DNS 解析再逐个地址校验（防 DNS 重绑定的第一步）
+  // 字面量 IP 直接查网段；域名先 DNS 解析再逐个地址校验
   if (net.isIP(host)) {
     if (isBlockedIp(host)) throw new Error(`不允许访问内网/保留地址: ${host}`);
-  } else {
-    const records = await lookup(host, { all: true, verbatim: true }).catch(() => []);
-    if (records.length === 0) throw new Error(`域名解析失败: ${host}`);
-    for (const { address } of records) {
-      if (isBlockedIp(address)) throw new Error(`域名 ${host} 解析到内网/保留地址 ${address}，已拒绝`);
-    }
+    return { url: parsed, address: host, family: net.isIPv6(host) ? 6 : 4 };
   }
-  return parsed;
+  const records = await lookup(host, { all: true, verbatim: true }).catch(() => []);
+  if (records.length === 0) throw new Error(`域名解析失败: ${host}`);
+  for (const { address } of records) {
+    if (isBlockedIp(address)) throw new Error(`域名 ${host} 解析到内网/保留地址 ${address}，已拒绝`);
+  }
+  const pinned = records[0];
+  if (!pinned) throw new Error(`域名解析失败: ${host}`);
+  return { url: parsed, address: pinned.address, family: pinned.family };
+}
+
+/**
+ * S-01：用预校验地址发起请求。自定义 lookup 让实际连接只能落在
+ * assertUrlAllowed 校验过的 IP 上——DNS 在校验与连接之间被重绑到内网
+ * 地址的攻击（TOCTOU）在此被消除。TLS 的 servername 仍取原主机名，
+ * 证书校验不受影响。
+ */
+function fetchPinned(rawUrl: string, address: string, family: number, signal: AbortSignal): Promise<IncomingMessage> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const url = new URL(rawUrl);
+    const lib = url.protocol === "https:" ? httpsRequest : httpRequest;
+    // 只返回预校验地址：重绑/多记录漂移都不再影响实际连接
+    const pinnedLookup = (
+      _host: string,
+      _opts: unknown,
+      cb: (err: Error | null, addr: { address: string; family: number }) => void,
+    ) => {
+      cb(null, { address, family });
+    };
+    const req = lib(url, {
+      lookup: pinnedLookup as unknown as never,
+      headers: { "User-Agent": "Workbench/1.0" },
+      signal,
+    }, (res) => {
+      settled = true;
+      resolve(res);
+    });
+    req.on("error", (err) => {
+      if (!settled) reject(err);
+    });
+    req.end();
+  });
 }
 
 /** 组合外部中止信号与内部超时 */
@@ -111,34 +153,29 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-/** 读取响应体，超过上限字节即停止（返回已读部分） */
-async function readBodyCapped(resp: Response): Promise<{ text: string; capped: boolean }> {
-  if (!resp.body) return { text: "", capped: false };
-  const reader = resp.body.getReader();
-  const chunks: Uint8Array[] = [];
+/** 读取响应体，超过上限字节即停止（返回已读部分）。接受 node 流（S-01 重构）。 */
+async function readBodyCapped(
+  stream: IncomingMessage,
+): Promise<{ text: string; capped: boolean }> {
+  const chunks: Buffer[] = [];
   let total = 0;
   let capped = false;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      chunks.push(value);
-      total += value.length;
+  try {
+    for await (const value of stream) {
+      const buf = Buffer.isBuffer(value) ? value : Buffer.from(value as Uint8Array);
+      chunks.push(buf);
+      total += buf.length;
       if (total >= MAX_BODY_BYTES) {
         capped = true;
-        await reader.cancel().catch(() => {});
+        stream.destroy();
         break;
       }
     }
+  } catch {
+    // 读取中断（对端断开/主动 destroy）：返回已读部分
   }
-  const merged = new Uint8Array(Math.min(total, MAX_BODY_BYTES));
-  let offset = 0;
-  for (const c of chunks) {
-    if (offset >= merged.length) break;
-    merged.set(c.subarray(0, merged.length - offset), offset);
-    offset += c.length;
-  }
-  return { text: new TextDecoder("utf-8", { fatal: false }).decode(merged), capped };
+  const merged = Buffer.concat(chunks).subarray(0, MAX_BODY_BYTES);
+  return { text: merged.toString("utf-8"), capped };
 }
 
 export function createWebFetchTool() {
@@ -156,24 +193,23 @@ export function createWebFetchTool() {
       const url = params.url?.trim();
       if (!url) return errResult("URL 不能为空");
       try {
-        // 手动跟随重定向：每一跳都重新做 SSRF 校验
+        // 手动跟随重定向：每一跳都重新做 SSRF 校验并把校验地址钉进连接
         let currentUrl = url;
         for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-          await assertUrlAllowed(currentUrl);
-          const resp = await fetch(currentUrl, {
-            signal: timeoutSignal(signal),
-            headers: { "User-Agent": "Workbench/1.0" },
-            redirect: "manual",
-          });
-          if (resp.status >= 300 && resp.status < 400) {
-            const location = resp.headers.get("location");
-            if (!location) return errResult(`HTTP ${resp.status}: 重定向缺少 Location`);
+          const pinned = await assertUrlAllowed(currentUrl);
+          const resp = await fetchPinned(currentUrl, pinned.address, pinned.family, timeoutSignal(signal));
+          const status = resp.statusCode ?? 0;
+          if (status >= 300 && status < 400) {
+            const location = resp.headers.location;
+            if (!location) return errResult(`HTTP ${status}: 重定向缺少 Location`);
             if (hop === MAX_REDIRECTS) return errResult(`重定向次数超过 ${MAX_REDIRECTS} 次`);
             currentUrl = new URL(location, currentUrl).toString();
             continue;
           }
-          if (!resp.ok) return errResult(`HTTP ${resp.status}: ${resp.statusText}`);
-          const contentType = resp.headers.get("content-type") ?? "";
+          if (status < 200 || status >= 300) {
+            return errResult(`HTTP ${status}: ${resp.statusMessage ?? ""}`);
+          }
+          const contentType = String(resp.headers["content-type"] ?? "");
           const { text: body, capped } = await readBodyCapped(resp);
           let text: string;
           if (contentType.includes("text/html")) {

@@ -57,7 +57,7 @@ const DEFAULT_BUSINESS_PROMPT = `# Workbench 业务助理
 - wiki_query：查询+综合分析+引用（分析产生洞察时存回 synthesis 页）
 - wiki_save_synthesis：存回综合分析页
 - wiki_discover_domains：扫描文档发现高频领域词，建议动态类型
-- wiki_create_schedule：创建定时规则（每日/每周/事件触发），到时间 Agent 主动执行
+- wiki_create_schedule：创建定时规则（每日/每周/事件触发；当前版本规则仅存储，定时执行器尚未接线，不会自动触发——如实告知用户）
 - wiki_list_schedules：列出定时规则
 - wiki_remove_schedule：删除定时规则
 - wiki_create_plugin：自己写工具插件代码到 .pi/extensions/（当你发现自己缺少某个能力时使用）
@@ -169,16 +169,46 @@ export function writeBusinessPrompt(userDataDir: string, content: string): void 
 }
 
 /**
- * 把业务提示词同步到 workspace 的 AGENTS.md。
- * 如果 AGENTS.md 不存在，直接写入；如果存在且内容不同，覆盖为业务提示词。
- * （我们管理整个 AGENTS.md，不和用户手动写的混合，避免重复。）
+ * 把业务提示词同步到 workspace 的 AGENTS.md（B-16：管理块模式）。
+ * - 文件不存在 → 写入完整提示词（首次初始化）
+ * - 文件存在 → 只替换/追加提示词对应的"管理块"，管理块之外的
+ *   用户手写内容原样保留（此前是整文件覆盖，用户自定义指令被静默清掉）
+ * 管理块用显式标记包裹，既能幂等更新又能与用户内容共存。
  */
+const AGENTS_MANAGED_BEGIN = "<!-- workecho:business-prompt:begin （此区块由 Workecho 管理，勿手改） -->";
+const AGENTS_MANAGED_END = "<!-- workecho:business-prompt:end -->";
+
 export function syncPromptToWorkspace(workspaceDir: string, prompt: string): void {
   const agentsFile = path.join(workspaceDir, "AGENTS.md");
-  // 只在不存在或内容不同时写入（避免每次启动都触发文件监听）
-  if (existsSync(agentsFile)) {
-    const existing = readFileSync(agentsFile, "utf-8");
-    if (existing === prompt) return;
+  const managedBlock = `${AGENTS_MANAGED_BEGIN}\n${prompt.trim()}\n${AGENTS_MANAGED_END}\n`;
+
+  if (!existsSync(agentsFile)) {
+    writeFileSync(agentsFile, managedBlock, "utf-8");
+    return;
   }
-  writeFileSync(agentsFile, prompt, "utf-8");
+  const existing = readFileSync(agentsFile, "utf-8");
+
+  if (existing.includes(AGENTS_MANAGED_BEGIN)) {
+    // 已有管理块：整体替换为新块（支持提示词更新；保留块外用户内容）
+    const start = existing.indexOf(AGENTS_MANAGED_BEGIN);
+    const end = existing.indexOf(AGENTS_MANAGED_END);
+    if (start !== -1 && end !== -1 && end > start) {
+      const next =
+        existing.slice(0, start) +
+        managedBlock +
+        existing.slice(end + AGENTS_MANAGED_END.length).replace(/^\n/, "");
+      if (next !== existing) writeFileSync(agentsFile, next, "utf-8");
+      return;
+    }
+  }
+
+  if (existing.trim() === prompt.trim() || existing.trim() === "") {
+    // 历史遗留：整文件就是旧版业务提示词（或空文件）→ 升级为管理块格式
+    writeFileSync(agentsFile, managedBlock, "utf-8");
+    return;
+  }
+
+  // 用户手写过内容且无管理块 → 追加管理块，绝不覆盖用户内容
+  const next = `${existing.trimEnd()}\n\n${managedBlock}`;
+  writeFileSync(agentsFile, next, "utf-8");
 }

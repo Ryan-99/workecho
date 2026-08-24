@@ -155,3 +155,74 @@ test("updateMemory: append 模式追加到 working-context", () => {
   // 原有内容保留
   assert.match(after, /本周重点|当前工作上下文/);
 });
+
+/* ===== B-01/B-08 回归：create 永不静默覆写 ===== */
+
+test("B-01 回归: createWikiPage 同名页已存在时拒绝且不改动原文件", () => {
+  createWikiPage(root, "memory", "user-profile", {}, "原始画像内容");
+  const second = createWikiPage(root, "memory", "user-profile", {}, "恶意覆写内容");
+  assert.equal(second.created, false);
+  assert.equal(second.exists, true);
+  const page = findPageByTitle(root, "user-profile");
+  assert.ok(page);
+  assert.ok(readFile(root, `workbench/wiki/${page.relPath}`).includes("原始画像内容"));
+  assert.ok(!readFile(root, `workbench/wiki/${page.relPath}`).includes("恶意覆写内容"));
+});
+
+test("B-01 回归: category='.' 被拒绝（不能借 create 写 wiki 根的管控文件）", () => {
+  assert.throws(() => createWikiPage(root, ".", "hooks", {}, "x"));
+});
+
+test("B-08 回归: suffixOnConflict 自动改名保留旧页", () => {
+  const first = createWikiPage(root, "knowledge/cases", "同名案例", {}, "第一份");
+  const second = createWikiPage(root, "knowledge/cases", "同名案例", {}, "第二份", { suffixOnConflict: true });
+  assert.equal(second.created, true);
+  assert.notEqual(second.relPath, first.relPath);
+  assert.ok(readFile(root, `workbench/wiki/${first.relPath}`).includes("第一份"));
+  assert.ok(readFile(root, `workbench/wiki/${second.relPath}`).includes("第二份"));
+});
+
+test("B-08 回归: overwrite=true 受控覆写仍然可用", () => {
+  createWikiPage(root, "knowledge/synthesis", "周报综合", {}, "v1");
+  const second = createWikiPage(root, "knowledge/synthesis", "周报综合", {}, "v2", { overwrite: true });
+  assert.equal(second.created, true);
+  assert.ok(readFile(root, `workbench/wiki/${second.relPath}`).includes("v2"));
+});
+
+/* ===== B-16 回归：AGENTS.md 管理块不覆盖用户内容 ===== */
+
+test("B-16 回归: 用户手写的 AGENTS.md 内容在同步后保留（管理块追加）", async () => {
+  const { syncPromptToWorkspace } = await import("../../electron/business-prompt.ts");
+  const fs = await import("node:fs");
+  const userContent = "# 我自己的规则\n\n- 回答用中文\n";
+  fs.writeFileSync(`${root}/AGENTS.md`, userContent, "utf-8");
+  syncPromptToWorkspace(root, "业务提示词 v1");
+  const after = fs.readFileSync(`${root}/AGENTS.md`, "utf-8");
+  assert.ok(after.includes("回答用中文"), "用户内容保留");
+  assert.ok(after.includes("业务提示词 v1"), "管理块已追加");
+  // 再同步 v2：用户内容仍在，管理块被替换
+  syncPromptToWorkspace(root, "业务提示词 v2");
+  const after2 = fs.readFileSync(`${root}/AGENTS.md`, "utf-8");
+  assert.ok(after2.includes("回答用中文"), "第二次同步后用户内容仍保留");
+  assert.ok(after2.includes("业务提示词 v2") && !after2.includes("业务提示词 v1"), "管理块更新为 v2");
+});
+
+test("B-16 回归: 首次同步直接写管理块；同内容旧形态升级、异内容视为用户内容保留", async () => {
+  const { syncPromptToWorkspace } = await import("../../electron/business-prompt.ts");
+  const fs = await import("node:fs");
+  syncPromptToWorkspace(root, "全新提示词");
+  const fresh = fs.readFileSync(`${root}/AGENTS.md`, "utf-8");
+  assert.ok(fresh.includes("workecho:business-prompt:begin"));
+  // 同内容重同步（无标记的旧形态）→ 升级为管理块
+  fs.writeFileSync(`${root}/AGENTS.md`, "全新提示词", "utf-8");
+  syncPromptToWorkspace(root, "全新提示词");
+  const upgraded = fs.readFileSync(`${root}/AGENTS.md`, "utf-8");
+  assert.ok(upgraded.includes("workecho:business-prompt:begin"), "同内容旧形态升级为管理块");
+  assert.ok(upgraded.includes("全新提示词"));
+  // 无法辨识来源的异内容 → 按用户内容保留并追加管理块（不覆盖）
+  fs.writeFileSync(`${root}/AGENTS.md`, "可能是旧版提示词或用户内容", "utf-8");
+  syncPromptToWorkspace(root, "新提示词");
+  const kept = fs.readFileSync(`${root}/AGENTS.md`, "utf-8");
+  assert.ok(kept.includes("可能是旧版提示词或用户内容"), "来源不明的内容按用户内容保留");
+  assert.ok(kept.includes("新提示词"));
+});

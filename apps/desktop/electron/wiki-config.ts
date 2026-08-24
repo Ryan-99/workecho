@@ -4,7 +4,7 @@
  * 存储在 <userDataDir>/wiki-config.json，控制所有 Wiki 功能的开关和行为参数。
  * SettingsView 的 "Wiki 知识库" tab 读写这里。
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync} from "node:fs";
 import path from "node:path";
 
 /** Wiki 配置数据模型 */
@@ -100,7 +100,13 @@ export function readWikiConfig(userDataDir: string): WikiConfig {
     const raw = JSON.parse(readFileSync(file, "utf-8"));
     // 合并：已有值优先，缺失字段补默认值
     return { ...DEFAULT_WIKI_CONFIG, ...raw };
-  } catch {
+  } catch (error) {
+    // B-17：损坏时保留残骸为 .bak 再回默认——否则下一次 patch 会把
+    // 用户的自定义开关静默覆写丢失且无从恢复
+    try {
+      copyFileSync(file, `${file}.corrupt-${Date.now().toString(36)}.bak`);
+      console.error(`[wiki-config] 配置损坏，已备份 ${file}（恢复默认值）:`, (error as Error).message);
+    } catch { /* 备份失败不阻断 */ }
     return { ...DEFAULT_WIKI_CONFIG };
   }
 }

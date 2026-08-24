@@ -60,9 +60,18 @@ export class TodoReminderService {
 
   start() {
     this.stop();
+    // B-12：定时器回调必须吞异常——同步回调里抛错会变成 uncaughtException，
+    // main.ts 对其 process.exit(1)，形成"重启→30 秒后再崩"的崩溃循环。
+    const safeCheck = () => {
+      try {
+        this.checkOnce();
+      } catch (error) {
+        console.error("[todo-reminder] 检查失败（本轮跳过）:", error);
+      }
+    };
     const check = () => {
-      this.checkOnce();
-      this.timer = setInterval(() => this.checkOnce(), CHECK_INTERVAL_MS) as unknown as NodeJS.Timeout;
+      safeCheck();
+      this.timer = setInterval(safeCheck, CHECK_INTERVAL_MS) as unknown as NodeJS.Timeout;
     };
     // 首次延迟 30 秒启动
     this.timer = setTimeout(check, 30000) as unknown as NodeJS.Timeout;

@@ -68,3 +68,17 @@ test("P4: memory 全空时不注入（避免空框架消息）", async () => {
   const r = await handlers.get("context")({ type: "context", messages }, {});
   assert.equal(r, undefined);
 });
+
+test("C-03 回归: insights 洞察层非空时同样注入（三层记忆对齐）", async () => {
+  const ext = createMemoryInjectionExtension({
+    readMemory: () => ({ userProfile: "", workingContext: "", insights: "客户沟通先看历史跟进。" }),
+  });
+  const { pi, handlers } = makePi();
+  ext(pi);
+  const messages = [{ role: "user", content: "你好" }];
+  const r = await handlers.get("context")({ type: "context", messages }, {});
+  assert.ok(r && r.messages, "应返回替换后的消息列表");
+  assert.match(r.messages[0].content, /## 洞察/, "注入内容包含洞察区块");
+  assert.match(r.messages[0].content, /客户沟通先看历史跟进/);
+  assert.match(r.messages[0].content, /<memory_data>/, "沿用数据边界标注");
+});

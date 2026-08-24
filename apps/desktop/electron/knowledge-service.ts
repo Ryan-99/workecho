@@ -8,11 +8,11 @@
  *
  * 同时提供 search_cases 工具供 AI 检索知识库。
  */
-import { existsSync, readdirSync, readFileSync, renameSync, mkdirSync, writeFileSync, statSync, type Dirent } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, mkdirSync, statSync, type Dirent } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { listEntities, type EntityData } from "./business-store";
-import { slugify, regenerateIndex, appendToLog } from "./wiki-manager";
+import { slugify, regenerateIndex, appendToLog, writeWikiFileSync } from "./wiki-manager";
 
 /** 扫描支持的文档扩展名 */
 const SCAN_EXTS = new Set([".md", ".txt", ".docx", ".pptx", ".xlsx"]);
@@ -48,10 +48,10 @@ export function getCommonDocDirs(): string[] {
   return dirs;
 }
 
-/** 路径是否应该跳过（黑名单检查） */
+/** 路径是否应该跳过（黑名单检查；B-19：大小写不敏感——注释此前就这么宣称，实现没做） */
 function shouldSkip(fullPath: string, dirName: string): boolean {
-  if (SKIP_DIRS.has(dirName)) return true;
-  const norm = fullPath.replace(/\\/g, "/");
+  if (SKIP_DIRS.has(dirName) || SKIP_DIRS.has(dirName.toLowerCase())) return true;
+  const norm = fullPath.replace(/\\/g, "/").toLowerCase();
   return SKIP_PATH_PARTS.some((p) => norm.includes(p));
 }
 
@@ -189,7 +189,7 @@ function writeKnowledgePage(
   const capped = body.length > MAX_BODY_CHARS
     ? body.slice(0, MAX_BODY_CHARS) + "\n\n…（正文超长，已截断，全文见 source 原文件）"
     : body;
-  writeFileSync(path.join(dir, fileName), `---\n${fmText}\n---\n\n# ${title}\n\n${capped}\n`, "utf-8");
+  writeWikiFileSync(path.join(dir, fileName), `---\n${fmText}\n---\n\n# ${title}\n\n${capped}\n`, "utf-8");
   appendToLog(cwd, `create_page | ${rel}/${fileName} | ${title}`);
   return `${rel}/${fileName}`;
 }
@@ -275,6 +275,15 @@ export function searchCases(cwd: string, query: string, limit = 10): EntityData[
 export function scanDocs(rootDir: string, maxDepth = 5, opts: { maxFiles?: number } = {}): string[] {
   const maxFiles = opts.maxFiles ?? 500;
   const out: string[] = [];
+  // B-19：扫描根本身也要过凭据目录判定——scanDir 直接指向 .ssh/.aws 时
+  // 此前的子目录过滤不生效（walk 只检查子项名，不检查根）
+  {
+    const rootNorm = path.resolve(rootDir).replace(/\\/g, "/").toLowerCase();
+    const rootName = path.basename(rootNorm);
+    if (SKIP_DIRS.has(rootName) || SKIP_PATH_PARTS.some((p) => rootNorm.includes(p))) {
+      return out;
+    }
+  }
   (function walk(dir: string, depth: number) {
     if (depth > maxDepth || out.length >= maxFiles) return;
     let entries: string[];

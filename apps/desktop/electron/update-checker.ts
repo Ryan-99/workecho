@@ -24,7 +24,20 @@ export type GitHubRelease = {
 };
 
 export function openReleasesPage(releaseUrl = RELEASES_PAGE): Promise<void> {
-  return shell.openExternal(releaseUrl);
+  // S-02：url 可能来自渲染层/上游回调，openExternal 直通任意协议
+  // （file:/自定义协议）是高危原语——只放行 http(s)
+  const parsed = (() => {
+    try {
+      return new URL(releaseUrl);
+    } catch {
+      return null;
+    }
+  })();
+  if (!parsed || (parsed.protocol !== "https:" && parsed.protocol !== "http:")) {
+    console.warn(`[update-checker] 拒绝打开非 http(s) 链接: ${releaseUrl}`);
+    return Promise.resolve();
+  }
+  return shell.openExternal(parsed.toString());
 }
 
 export function showUpdateNotification(

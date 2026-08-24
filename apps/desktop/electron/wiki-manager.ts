@@ -21,7 +21,7 @@
  *
  * 参考 WIKI-DESIGN.md 第二节目录结构。
  */
-import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, readdirSync, renameSync, rmdirSync, statSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, readdirSync, renameSync, rmSync, rmdirSync, statSync, copyFileSync, type Dirent } from "node:fs";
 import path from "node:path";
 import { parseEntity, stringifyFrontmatter, wikiCategoryDir, safeRelPath, resolveInside } from "./business-store";
 
@@ -36,6 +36,29 @@ export function wikiRoot(workspaceDir: string): string {
 /** _sources 根目录 */
 export function sourcesRoot(workspaceDir: string): string {
   return path.join(workbenchRoot(workspaceDir), "_sources");
+}
+
+/**
+ * B-09：同步原子写（tmp + rename，Windows 占用时 unlink-retry）。
+ * wiki/业务层此前全部 writeFileSync 直写——进程崩溃/断电/AV 干扰会产生
+ * 截断的 .md，且 parseEntity 会把残页当正常页继续服务。
+ * 同步语义保持不变（调用方均为同步代码路径），只把"写中间态可见"变成
+ * "要么旧内容要么新内容"。
+ */
+export function writeWikiFileSync(target: string, content: string, _encoding?: string): void {
+  const tmp = `${target}.${process.pid}.${Date.now().toString(36)}.tmp`;
+  writeFileSync(tmp, content, "utf-8");
+  try {
+    renameSync(tmp, target);
+  } catch {
+    try {
+      if (existsSync(target)) rmSync(target, { force: true });
+      renameSync(tmp, target);
+    } catch (fallbackError) {
+      try { rmSync(tmp, { force: true }); } catch { /* ignore */ }
+      throw fallbackError;
+    }
+  }
 }
 
 /** 固定 wiki 类别（所有用户都有） */
@@ -68,7 +91,7 @@ export function ensureWikiStructure(workspaceDir: string): void {
   // 初始化 index.md（不存在才写）
   const indexPath = path.join(wiki, "index.md");
   if (!existsSync(indexPath)) {
-    writeFileSync(indexPath, regenerateIndex(workspaceDir), "utf-8");
+    writeWikiFileSync(indexPath, regenerateIndex(workspaceDir), "utf-8");
   }
 
   // 初始化 log.md（不存在才写）
@@ -81,12 +104,20 @@ export function ensureWikiStructure(workspaceDir: string): void {
 /* ============ log.md ============ */
 
 /** 追加一条操作日志（append-only，自动加日期前缀）。
- * "- " 前缀使其成为 Markdown 列表项——逐行渲染不被段落折叠。 */
+ * "- " 前缀使其成为 Markdown 列表项——逐行渲染不被段落折叠。
+ * B-18：自建目录 + 失败告警——此前 fresh workspace 上首次审计写入会 ENOENT
+ * 且被调用方静默吞掉，审计缺失无感知。 */
 export function appendToLog(workspaceDir: string, message: string): void {
-  const logPath = path.join(wikiRoot(workspaceDir), "log.md");
+  const wiki = wikiRoot(workspaceDir);
+  const logPath = path.join(wiki, "log.md");
   const date = new Date().toISOString().slice(0, 10);
   const line = `- ${date} ${message}\n`;
-  appendFileSync(logPath, line, "utf-8");
+  try {
+    mkdirSync(wiki, { recursive: true });
+    appendFileSync(logPath, line, "utf-8");
+  } catch (error) {
+    console.error(`[wiki-manager] 审计日志写入失败（${logPath}）:`, (error as Error).message);
+  }
 }
 
 /** 读取完整日志内容 */
@@ -164,7 +195,7 @@ export function regenerateIndex(workspaceDir: string): string {
   }
 
   const content = lines.join("\n") + "\n";
-  writeFileSync(path.join(wikiRoot(workspaceDir), "index.md"), content, "utf-8");
+  writeWikiFileSync(path.join(wikiRoot(workspaceDir), "index.md"), content, "utf-8");
   return content;
 }
 
@@ -217,7 +248,7 @@ export function addCrossReference(
   frontmatter.related = related;
   frontmatter.updated = new Date().toISOString().slice(0, 10);
   const newText = stringifyFrontmatter(frontmatter) + "\n" + body + "\n";
-  writeFileSync(filePath, newText, "utf-8");
+  writeWikiFileSync(filePath, newText, "utf-8");
   return true;
 }
 
@@ -241,13 +272,28 @@ function scanAllPages(workspaceDir: string): WikiPage[] {
   if (!existsSync(wiki)) return [];
   const pages: WikiPage[] = [];
   function walk(dir: string, relBase: string) {
-    for (const name of readdirSync(dir, { withFileTypes: true })) {
+    // B-12：目录/单文件瞬时不可读（ENOENT/EPERM）时跳过而不是抛出——
+    // 该函数被多个查询工具与定时器复用，抛错会放大成进程级崩溃。
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+      console.warn(`[wiki-manager] scanAllPages 跳过不可读目录 ${dir}:`, (error as Error).message);
+      return;
+    }
+    for (const name of entries) {
       const childPath = path.join(dir, name.name);
       const childRel = relBase ? `${relBase}/${name.name}` : name.name;
       if (name.isDirectory()) {
         walk(childPath, childRel);
       } else if (name.name.endsWith(".md") && name.name !== "index.md") {
-        const text = readFileSync(childPath, "utf-8");
+        let text: string;
+        try {
+          text = readFileSync(childPath, "utf-8");
+        } catch (error) {
+          console.warn(`[wiki-manager] scanAllPages 跳过不可读文件 ${childPath}:`, (error as Error).message);
+          continue;
+        }
         const { frontmatter } = parseEntity(text);
         const title = String(frontmatter.title ?? path.basename(name.name, ".md"));
         pages.push({ relPath: childRel, title, text, links: extractAllLinks(text) });
@@ -309,9 +355,18 @@ export function lintWiki(workspaceDir: string): LintReport {
 
 export interface CreatePageResult {
   created: boolean;
+  /** 目标已存在且未覆写（created=false）时为 true——调用方应提示改用更新类工具 */
+  exists?: boolean;
   relPath: string;   // 相对 wiki/
   fileName: string;
   id: string;
+}
+
+export interface CreatePageOptions {
+  /** 目标已存在时允许整页覆写（仅限内部受控调用方，如综合页重建） */
+  overwrite?: boolean;
+  /** 目标已存在时自动改名（-2/-3…）保留旧页（摄取/导入用，对齐 knowledge-service 的冲突策略） */
+  suffixOnConflict?: boolean;
 }
 
 /** 生成文件名 slug：中文保留，空格/特殊字符替换为 - */
@@ -325,6 +380,10 @@ export function slugify(text: string): string {
 
 /**
  * 在 wiki 中创建一个新页面（统一入口）。
+ * B-01/B-08：默认绝不覆写已存在的同名文件——命中时按 opts 处理：
+ * 未传 opts → 返回 created=false/exists=true（调用方引导改用 wiki_update_page 等
+ * 自带确认门的更新工具，杜绝"create 整页覆写记忆页/hooks.md"的确认门绕过）；
+ * suffixOnConflict → 自动改名保留旧页；overwrite → 受控覆写。
  * @param category 类别（okr/todos/maintenance/.../knowledge/cases/memory/...）
  * @param title 页面标题（也是 h1 和 frontmatter.title）
  * @param extraFm 额外 frontmatter 字段
@@ -336,22 +395,42 @@ export function createWikiPage(
   title: string,
   extraFm: Record<string, unknown> = {},
   body = "",
+  opts: CreatePageOptions = {},
 ): CreatePageResult {
   const wiki = wikiRoot(workspaceDir);
-  const dir = resolveInside(wiki, safeRelPath(category, "wiki 分类"));
+  const normCategory = safeRelPath(category, "wiki 分类");
+  const dir = resolveInside(wiki, normCategory);
   mkdirSync(dir, { recursive: true });
 
-  const fileName = `${slugify(title)}.md`;
-  const fullPath = path.join(dir, fileName);
-  const relPath = `${category}/${fileName}`;
-  const id = extraFm.id as string ?? `${category.replace(/\//g, "-")}-${Date.now().toString(36)}`;
+  const slugBase = slugify(title);
+  let fileName = `${slugBase}.md`;
+  let fullPath = path.join(dir, fileName);
+  const id = extraFm.id as string ?? `${normCategory.replace(/\//g, "-")}-${Date.now().toString(36)}`;
   const today = new Date().toISOString().slice(0, 10);
+
+  if (existsSync(fullPath)) {
+    if (opts.suffixOnConflict) {
+      for (let n = 2; ; n++) {
+        const candidate = `${slugBase}-${n}.md`;
+        if (!existsSync(path.join(dir, candidate))) {
+          fileName = candidate;
+          fullPath = path.join(dir, fileName);
+          break;
+        }
+      }
+    } else if (!opts.overwrite) {
+      appendToLog(workspaceDir, `create_page_refused | ${normCategory}/${fileName} | ${title}`);
+      return { created: false, exists: true, relPath: `${normCategory}/${fileName}`, fileName, id: String(id) };
+    }
+  }
+
+  const relPath = `${normCategory}/${fileName}`;
 
   const fm: Record<string, unknown> = {
     id,
     title,
     type: extraFm.type ?? "entity",
-    category: extraFm.category ?? category,
+    category: extraFm.category ?? normCategory,
     created: today,
     updated: today,
     ...extraFm,
@@ -362,9 +441,9 @@ export function createWikiPage(
   if (!fm.type) fm.type = "entity";
 
   const content = stringifyFrontmatter(fm) + (body ? `\n${body}\n` : "\n");
-  writeFileSync(fullPath, content, "utf-8");
+  writeWikiFileSync(fullPath, content, "utf-8");
 
-  appendToLog(workspaceDir, `create_page | ${relPath} | ${title}`);
+  appendToLog(workspaceDir, `create_page${opts.overwrite && fileName === `${slugBase}.md` ? "_overwrite" : ""} | ${relPath} | ${title}`);
   regenerateIndex(workspaceDir);
 
   return { created: true, relPath, fileName, id: String(id) };
@@ -373,6 +452,8 @@ export function createWikiPage(
 export interface UpdatePageOptions {
   appendBody?: string;        // 追加到 body（不覆写）
   frontmatterUpdates?: Record<string, unknown>;  // 更新 frontmatter 字段
+  /** 整体替换 body（B-10：供 advanceGoal 等需要"改写某一区块"的调用方使用） */
+  replaceBody?: string;
 }
 
 /**
@@ -384,6 +465,7 @@ export function updateWikiPage(
   relPath: string,
   appendBody = "",
   frontmatterUpdates: Record<string, unknown> = {},
+  opts: UpdatePageOptions = {},
 ): boolean {
   const fullPath = resolveInside(wikiRoot(workspaceDir), safeRelPath(relPath, "页面路径"));
   if (!existsSync(fullPath)) return false;
@@ -393,13 +475,27 @@ export function updateWikiPage(
 
   const updatedFm = { ...frontmatter, ...frontmatterUpdates, updated: new Date().toISOString().slice(0, 10) };
   let newBody = body;
-  if (appendBody) newBody = body ? `${body}\n${appendBody}` : appendBody;
+  if (typeof opts.replaceBody === "string") {
+    newBody = opts.replaceBody;
+  } else if (appendBody) {
+    newBody = body ? `${body}\n${appendBody}` : appendBody;
+  }
 
   const content = stringifyFrontmatter(updatedFm) + "\n" + newBody + "\n";
-  writeFileSync(fullPath, content, "utf-8");
+  writeWikiFileSync(fullPath, content, "utf-8");
 
   appendToLog(workspaceDir, `update_page | ${relPath}`);
   return true;
+}
+
+/** 把 body 中 "## <heading>" 区块替换为 replacement（不存在则追加，B-10） */
+export function replaceBodySection(body: string, heading: string, replacement: string): string {
+  const block = replacement.trimEnd();
+  const re = new RegExp(`^## ${heading}[ \\t]*\\r?\\n[\\s\\S]*?(?=^## |$)`, "m");
+  if (re.test(body)) {
+    return body.replace(re, `${block}\n`);
+  }
+  return body.trim() ? `${body.trimEnd()}\n\n${block}\n` : `${block}\n`;
 }
 
 /** 按标题查找页面（全 wiki 搜索） */
@@ -462,7 +558,7 @@ export function updateMemory(
       created: today,
       updated: today,
     };
-    writeFileSync(fullPath, stringifyFrontmatter(fm) + "\n" + newBody + "\n", "utf-8");
+    writeWikiFileSync(fullPath, stringifyFrontmatter(fm) + "\n" + newBody + "\n", "utf-8");
     appendToLog(workspaceDir, `create_memory | memory/${fileName}`);
     return true;
   }
@@ -472,7 +568,7 @@ export function updateMemory(
   const updatedFm = { ...frontmatter, updated: today };
   const finalBody = mode === "replace" ? newBody : body ? `${body}\n${newBody}` : newBody;
 
-  writeFileSync(fullPath, stringifyFrontmatter(updatedFm) + "\n" + finalBody + "\n", "utf-8");
+  writeWikiFileSync(fullPath, stringifyFrontmatter(updatedFm) + "\n" + finalBody + "\n", "utf-8");
   appendToLog(workspaceDir, `update_memory | memory/${fileName}`);
   return true;
 }
@@ -507,6 +603,10 @@ export function createGoal(
     created: today,
     updated: today,
   });
+  // B-08：同名目标已存在时不覆写（此前会静默清掉旧目标的进展）
+  if (!result.created) {
+    throw new Error(`同名目标已存在：${title}（relPath=${result.relPath}）。请换标题，或用 wiki_advance_goal / wiki_update_page 更新既有目标。`);
+  }
 
   // 生成步骤 checklist body
   const checklist = steps.map((s, i) => `- [${i === 0 ? " " : " "}] ${s}`).join("\n");
@@ -538,9 +638,12 @@ export function advanceGoal(workspaceDir: string, relPath: string): boolean {
   };
   if (isComplete) updates.status = "complete" as GoalStatus;
 
-  // 重建 checklist body
+  // 重建 checklist body（B-10：替换"## 进展"区块而非追加，避免 N 次推进堆出 N+1 个区块）
   const checklist = steps.map((s, i) => `- [${i < (isComplete ? steps.length : next) ? "x" : " "}] ${s}`).join("\n");
-  updateWikiPage(workspaceDir, relPath, `## 进展\n${checklist}\n`, updates);
+  const raw = readFileSync(fullPath, "utf-8");
+  const { body } = parseEntity(raw);
+  const newBody = replaceBodySection(body, "进展", `## 进展\n${checklist}`);
+  updateWikiPage(workspaceDir, relPath, "", updates, { replaceBody: newBody });
 
   appendToLog(workspaceDir, `advance_goal | ${relPath} | step ${next}/${steps.length}${isComplete ? " COMPLETE" : ""}`);
   return true;
@@ -676,7 +779,8 @@ export function ingestText(
     updated: today,
   };
 
-  const result = createWikiPage(workspaceDir, wikiSubdir, title, fm, text);
+  // B-08：同名知识页自动改名保留旧页（重复摄取同名文档不再静默覆写）
+  const result = createWikiPage(workspaceDir, wikiSubdir, title, fm, text, { suffixOnConflict: true });
 
   // 反向引用：给被引用的实体页也添加 related 指向新知识页
   for (const ref of crossRefs) {
@@ -903,7 +1007,8 @@ export function saveSynthesis(
     created: today,
     updated: today,
   };
-  const result = createWikiPage(workspaceDir, "knowledge/synthesis", title, fm, content);
+  // 综合页由应用受控重建，允许覆写（saveSynthesis 每次都是全量重写）
+  const result = createWikiPage(workspaceDir, "knowledge/synthesis", title, fm, content, { overwrite: true });
   appendToLog(workspaceDir, `synthesis | ${result.relPath} | ${title} | sources:${sources.length}`);
   return { relPath: result.relPath, id: result.id };
 }
@@ -1140,7 +1245,7 @@ export function seedWikiDefaults(workspaceDir: string): void {
   // user-profile.md
   const profilePath = path.join(wiki, "memory", "user-profile.md");
   if (!existsSync(profilePath)) {
-    writeFileSync(profilePath, stringifyFrontmatter({
+    writeWikiFileSync(profilePath, stringifyFrontmatter({
       title: "用户画像",
       type: "memory",
       category: "memory",
@@ -1168,7 +1273,7 @@ export function seedWikiDefaults(workspaceDir: string): void {
   // working-context.md
   const ctxPath = path.join(wiki, "memory", "working-context.md");
   if (!existsSync(ctxPath)) {
-    writeFileSync(ctxPath, stringifyFrontmatter({
+    writeWikiFileSync(ctxPath, stringifyFrontmatter({
       title: "当前工作上下文",
       type: "memory",
       category: "memory",
@@ -1194,7 +1299,7 @@ export function seedWikiDefaults(workspaceDir: string): void {
   // insights.md
   const insightsPath = path.join(wiki, "memory", "insights.md");
   if (!existsSync(insightsPath)) {
-    writeFileSync(insightsPath, stringifyFrontmatter({
+    writeWikiFileSync(insightsPath, stringifyFrontmatter({
       title: "对话洞察",
       type: "memory",
       category: "memory",
@@ -1211,7 +1316,7 @@ export function seedWikiDefaults(workspaceDir: string): void {
   // 示例 OKR
   const okrPath = path.join(wiki, "okr", "example-okr.md");
   if (!existsSync(okrPath)) {
-    writeFileSync(okrPath, stringifyFrontmatter({
+    writeWikiFileSync(okrPath, stringifyFrontmatter({
       id: "example-okr",
       title: "示例：Q3 业务目标（可编辑或删除）",
       type: "entity",
@@ -1233,7 +1338,7 @@ export function seedWikiDefaults(workspaceDir: string): void {
   // 示例待办
   const todoPath = path.join(wiki, "todos", "example-todo.md");
   if (!existsSync(todoPath)) {
-    writeFileSync(todoPath, stringifyFrontmatter({
+    writeWikiFileSync(todoPath, stringifyFrontmatter({
       id: "example-todo",
       title: "示例待办：配置好 Provider 后删除这些示例",
       type: "todo",
@@ -1322,7 +1427,7 @@ export function importLegacyWiki(workspaceDir: string, sourceDir: string): Legac
       const newContent = existing
         ? existing.replace(/^# 知识目录\s*\n/, `# 知识目录\n\n${curated}\n`)
         : `# 知识目录\n\n${curated}\n`;
-      writeFileSync(path.join(wiki, "index.md"), newContent, "utf-8");
+      writeWikiFileSync(path.join(wiki, "index.md"), newContent, "utf-8");
     }
   }
 

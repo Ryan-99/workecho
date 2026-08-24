@@ -81,3 +81,58 @@ test("PipelineDecision: PASS 和 BLOCK 常量存在", () => {
   assert.equal(PipelineDecision.PASS, "pass");
   assert.equal(PipelineDecision.BLOCK, "block");
 });
+
+/* ===== B-01/B-03/B-04 回归：确认门覆盖面与开关独立性 ===== */
+
+test("B-01 回归: wiki_create_page 写 memory/ 是危险操作（持久化注入面）", () => {
+  assert.ok(isDangerousOp("wiki_create_page", { category: "memory", title: "x" }));
+  assert.ok(isDangerousOp("wiki_create_page", { category: "Memory/", title: "x" }));
+  assert.ok(!isDangerousOp("wiki_create_page", { category: "todos", title: "x" }));
+});
+
+test("B-01 回归: wiki_update_page 按标题更新管控文件（hooks/schedule/log）是危险操作", () => {
+  assert.ok(isDangerousOp("wiki_update_page", { title: "Hooks" }));
+  assert.ok(isDangerousOp("wiki_update_page", { title: "schedule" }));
+  assert.ok(!isDangerousOp("wiki_update_page", { title: "普通页面" }));
+});
+
+test("B-03 回归: wiki_import_legacy 与 init_workspace 显式 scanDir 是危险操作", () => {
+  assert.ok(isDangerousOp("wiki_import_legacy", { sourceDir: "D:/outside" }));
+  assert.ok(isDangerousOp("init_workspace", { scanDir: "D:/outside" }));
+  assert.ok(!isDangerousOp("init_workspace", {}));
+});
+
+test("B-04 回归: pipelineEnabled=false 不再连带关闭危险确认", async () => {
+  // 直接驱动 policy 扩展：模拟 pi 事件回调，配置 pipelineEnabled=false
+  const { getActiveWikiConfig } = await import("../../electron/wiki-config.ts");
+  const { setDangerousOpConfirmer } = await import("../../electron/tool-pipeline.ts");
+  const registered = {};
+  const pi = { on: (event, handler) => { registered[event] = handler; }, registerTool: () => {} };
+  createPolicyExtension()(pi);
+  const toolCall = registered["tool_call"] ?? registered.tool_call ?? Object.values(registered)[0];
+  assert.ok(typeof toolCall === "function", "tool_call 钩子已注册");
+
+  // 写入 pipelineEnabled=false 的配置（其他开关全默认开）
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const os = await import("node:os");
+  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), "wb-b04-"));
+  fs.mkdirSync(path.join(root, "workbench/wiki"), { recursive: true });
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "wb-b04-ud-"));
+  const { setActiveWikiUserDataDir } = await import("../../electron/wiki-config.ts");
+  setActiveWikiUserDataDir(userDataDir);
+  fs.writeFileSync(path.join(userDataDir, "wiki-config.json"), JSON.stringify({ pipelineEnabled: false }));
+  assert.equal(getActiveWikiConfig().pipelineEnabled, false);
+
+  let confirmed = 0;
+  setDangerousOpConfirmer(async () => { confirmed += 1; return false; });
+  const verdict = await toolCall(
+    { toolName: "update_entity", input: { type: "okr", id: "q3", updates: {} } },
+    { cwd: root },
+  );
+  assert.equal(confirmed, 1, "危险确认在 pipelineEnabled=false 下仍然触发");
+  assert.deepEqual(verdict, { block: true, reason: "用户拒绝了危险操作" });
+  setDangerousOpConfirmer(null);
+  fs.rmSync(cfgDir, { recursive: true, force: true });
+  fs.rmSync(userDataDir, { recursive: true, force: true });
+});

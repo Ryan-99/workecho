@@ -9,7 +9,7 @@
  *   旧路径 workbench/<type>/        （迁移前，向后兼容）
  * entityDir 优先用新路径，不存在则回退旧路径。
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 /** 默认实体类型（固定 + 常见动态类型）。实际可用类型通过 listEntityTypes 动态发现。 */
@@ -38,6 +38,11 @@ export function safeRelPath(seg: string, label = "路径"): string {
   if (path.isAbsolute(seg) || path.isAbsolute(normalized) || normalized.split("/").includes("..")) {
     throw new Error(`${label}不允许逃逸工作区: ${seg}`);
   }
+  // B-01："." 归一化后命中 wiki 根——root 下的 hooks.md/schedule.md/log.md 是
+  // 安全管控文件，wiki 工具不允许直接写根目录
+  if (normalized === "." || normalized.split("/").includes("")) {
+    throw new Error(`${label}不允许指向根目录或包含空路径段: ${seg}`);
+  }
   return normalized;
 }
 
@@ -48,7 +53,29 @@ export function resolveInside(root: string, rel: string): string {
   if (full !== absRoot && !full.startsWith(absRoot + path.sep)) {
     throw new Error(`路径不在 ${root} 内: ${rel}`);
   }
+  // S-05：符号链接逃逸——逻辑路径在界内但 realpath 指向界外时拒绝。
+  // realpathSync 对不存在的尾段会抛错，逐段回退取已存在部分的真身。
+  try {
+    const realFull = realpathBestEffort(full);
+    const realRoot = realpathBestEffort(absRoot);
+    if (realFull !== realRoot && !realFull.startsWith(realRoot + path.sep)) {
+      throw new Error(`路径经符号链接逃逸出 ${root}: ${rel}`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("逃逸")) throw error;
+    // realpath 不可用（如网络盘）时退回逻辑路径判定，不阻断常规使用
+  }
   return full;
+}
+
+function realpathBestEffort(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    const parent = path.dirname(p);
+    if (parent === p) return p;
+    return path.join(realpathBestEffort(parent), path.basename(p));
+  }
 }
 
 /** wiki 根目录（统一知识层） */
@@ -218,7 +245,9 @@ export function stringifyFrontmatter(fm: Record<string, unknown>): string {
 }
 
 export function readEntity(cwd: string, type: string, id: string): EntityData | null {
-  const file = path.join(entityDir(cwd, type), `${id}.md`);
+  // B-02/S-07：id 来自模型输入，统一走 safeRelPath（entityFile 同款防护），
+  // 否则 "id=../../outside" 可读工作区外任意 .md
+  const file = path.join(entityDir(cwd, type), `${safeRelPath(id, "实体 id")}.md`);
   if (!existsSync(file)) return null;
   return parseEntity(readFileSync(file, "utf-8"));
 }
@@ -227,9 +256,21 @@ export function listEntities(cwd: string, type: string): EntityData[] {
   const dir = entityDir(cwd, type);
   if (!existsSync(dir)) return [];
   const out: EntityData[] = [];
-  for (const name of readdirSync(dir)) {
+  // B-12：单文件读取失败（并发删除/AV 短暂锁住的 ENOENT/EPERM）只跳过该文件，
+  // 不让异常沿 todo-reminder 的定时器回调升级成 uncaughtException → 整个进程退出。
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  for (const name of names) {
     if (!name.endsWith(".md")) continue;
-    out.push(parseEntity(readFileSync(path.join(dir, name), "utf-8")));
+    try {
+      out.push(parseEntity(readFileSync(path.join(dir, name), "utf-8")));
+    } catch (error) {
+      console.warn(`[business-store] listEntities 跳过不可读文件 ${path.join(dir, name)}:`, (error as Error).message);
+    }
   }
   return out;
 }

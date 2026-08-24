@@ -118,10 +118,18 @@ export class ReminderScheduler {
 
     const myGeneration = ++this.generation;
     const delay = next.getTime() - now.getTime();
+    // B-12：回调内吞异常，保证后续 setInterval 一定建立（否则一次失败就让每日提醒永久静默死亡）
+    const safeRun = () => {
+      try {
+        this.runOnce();
+      } catch (error) {
+        console.error("[scheduler] 检查失败（本轮跳过）:", error);
+      }
+    };
     this.timer = setTimeout(async () => {
-      this.runOnce();
+      safeRun();
       if (myGeneration !== this.generation) return;
-      this.timer = setInterval(() => this.runOnce(), 86400000) as unknown as NodeJS.Timeout;
+      this.timer = setInterval(safeRun, 86400000) as unknown as NodeJS.Timeout;
     }, delay) as unknown as NodeJS.Timeout;
     console.log(`[scheduler] 下次提醒检查: ${next.toLocaleString()}`);
   }
