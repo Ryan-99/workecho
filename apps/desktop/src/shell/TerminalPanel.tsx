@@ -13,6 +13,8 @@ interface Props {
 export function TerminalPanel({ state }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  // R-19：onData 闭包不能依赖 state（订阅时 sessionId 还是 null，输入会被丢）——用 ref 直读
+  const sessionRef = useRef<string | null>(null);
   const [height, setHeight] = useState(200);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -68,25 +70,28 @@ export function TerminalPanel({ state }: Props) {
         const panel = await window.piApp.ensureTerminalPanel(wsId, "main", {
           cols: term.cols, rows: term.rows,
         });
+        // R-19：await 期间用户可能已切走工作区（effect cleanup 已 dispose 旧
+        // xterm）——旧工作区的 pty 不得绑进新终端
+        if (disposed) return;
         if (panel.sessions.length > 0) {
           const s = panel.sessions[0];
           if (s) {
             setSessionId(s.id);
+            sessionRef.current = s.id;
             if (s.replay) term.write(s.replay);
           }
         }
       } catch (e) {
+        if (disposed) return;
         console.error("[terminal] pty 初始化失败:", e);
         term.writeln("\r\n终端初始化失败: " + (e as Error).message);
       }
 
       // xterm 输入 → pty
       term.onData((data: string) => {
-        if (sessionId) {
-          window.piApp.writeTerminal(sessionId, data);
-        } else {
-          // sessionId 还没 set，用闭包内的值
-          // 重新从 state 拿
+        const sid = sessionRef.current;
+        if (sid) {
+          window.piApp.writeTerminal(sid, data);
         }
       });
     };
@@ -94,6 +99,9 @@ export function TerminalPanel({ state }: Props) {
 
     return () => {
       disposed = true;
+      // R-19：解除旧 pty 绑定，避免 onTerminalData 把旧工作区输出写进新终端
+      sessionRef.current = null;
+      setSessionId(null);
       if (termRef.current) {
         termRef.current.dispose();
         termRef.current = null;

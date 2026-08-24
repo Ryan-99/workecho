@@ -60,7 +60,20 @@ interface Props {
 }
 
 export function ChatPanel({ state, transcript, sending, showTerminal, onSend, onCancel, onStateRefresh, scrollRef }: Props) {
+  // R-14：草稿按会话隔离——切会话时保存当前草稿、恢复目标会话的草稿，
+  // 而不是让 A 会话的未发文字泄漏到 B 会话输入框
+  const draftsRef = useRef<Map<string, string>>(new Map());
+  const sessionKey = `${state.selectedWorkspaceId}:${state.selectedSessionId}`;
   const [text, setText] = useState("");
+  const prevSessionKeyRef = useRef(sessionKey);
+  useEffect(() => {
+    if (prevSessionKeyRef.current === sessionKey) return;
+    // 会话切换：暂存旧会话草稿 → 恢复新会话草稿
+    draftsRef.current.set(prevSessionKeyRef.current, text);
+    prevSessionKeyRef.current = sessionKey;
+    setText(draftsRef.current.get(sessionKey) ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionKey]);
   const [planOn, setPlanOn] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const items = transcript?.transcript ?? [];

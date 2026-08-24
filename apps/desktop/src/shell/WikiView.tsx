@@ -35,7 +35,7 @@ const MORANDI = [
   "#C4B5A5", // 浅驼
 ];
 
-export function WikiView(_props: { onClose?: () => void }) {
+export function WikiView({ onClose }: { onClose?: () => void }) {
   const api = window as any;
   const [mode, setMode] = useState<"list" | "graph">("list");
   const [pages, setPages] = useState<PageSummary[] | null>(null);
@@ -135,6 +135,7 @@ export function WikiView(_props: { onClose?: () => void }) {
             <Share2 size={12} /> 图谱
           </button>
           <button onClick={load} title="刷新"><RefreshCw size={12} /></button>
+          {onClose && <button onClick={onClose} title="关闭知识库"><X size={12} /> 关闭</button>}
         </div>
       </div>
 

@@ -117,33 +117,46 @@ export default function App() {
     document.addEventListener("mouseup", onUp);
   }, [statusWidth]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // R-12：revision 单调守卫——所有 setState(invoke 响应) 都要过这道闸，
+  // 否则 await 期间到达的更新事件会被旧快照回滚（正确实现此前只在死代码岛里）
+  const stateRevisionRef = useRef(-1);
+  const applyState = useCallback((s: DesktopAppState | null | undefined) => {
+    if (!s) return;
+    const rev = typeof s.revision === "number" ? s.revision : -1;
+    if (rev < stateRevisionRef.current) return; // 过期快照，丢弃
+    stateRevisionRef.current = Math.max(stateRevisionRef.current, rev);
+    setState(s);
+    setLocalView(s.activeView);
+  }, []);
 
   // 订阅主进程状态推送（单一数据源：main 的 DesktopAppStore）
   useEffect(() => {
     const api = (window as any).piApp;
     if (!api) return; // 缺少 piApp 时由渲染层的诊断占位处理
-    let rev = -1;
     api.getState().then((s: DesktopAppState) => {
-      rev = s.revision;
-      setState(s);
-      setLocalView(s.activeView);
+      applyState(s);
     }).catch((e: unknown) => console.error("[App] getState failed:", e));
     const off = api.onStateChanged((s: DesktopAppState) => {
-      // revision 守卫：防止旧快照覆盖新快照
-      if (s.revision > rev) {
-        rev = s.revision;
-        setState(s);
-        setLocalView(s.activeView);
-      }
+      // revision 守卫在 applyState 内：防止旧快照覆盖新快照
+      applyState(s);
     });
     return off;
-  }, []);
+  }, [applyState]);
 
   // 订阅选中会话的 transcript（对话内容）
   useEffect(() => {
     const api = window.piApp;
-    api.getSelectedTranscript().then(setTranscript);
-    const off = api.onSelectedTranscriptChanged(setTranscript);
+    // R-13：初始拉取与推送竞态——用户快速切换会话时，A 会话的初始拉取结果
+    // 可能晚于 B 会话的推送到达，把 B 的内容覆盖成 A。首个推送到达后初始
+    // 拉取结果作废。
+    let receivedPushedTranscript = false;
+    api.getSelectedTranscript().then((t) => {
+      if (!receivedPushedTranscript) setTranscript(t);
+    });
+    const off = api.onSelectedTranscriptChanged((t) => {
+      receivedPushedTranscript = true;
+      setTranscript(t);
+    });
     return off;
   }, []);
 
@@ -180,20 +193,20 @@ export default function App() {
   const setActiveView = useCallback(async (v: AppView) => {
     setLocalView(v);
     const s = await window.piApp.setActiveView(v);
-    setState(s);
-  }, []);
+    applyState(s);
+  }, [applyState]);
 
   // 发送消息
   const sendMessage = useCallback(async (text: string) => {
     const s = await window.piApp.submitComposer(text);
-    setState(s);
+    applyState(s);
   }, []);
 
   // 新建会话
   const newSession = useCallback(async () => {
     const s = await window.piApp.createSession({ workspaceId: state?.selectedWorkspaceId ?? "" });
-    setState(s);
-  }, [state?.selectedWorkspaceId]);
+    applyState(s);
+  }, [state?.selectedWorkspaceId, applyState]);
 
   // 选择会话：立即切 UI（不等 IPC 队列），避免 agent streaming 时卡住
   const selectSession = useCallback(async (sessionId: string) => {
@@ -203,7 +216,7 @@ export default function App() {
       const api = window.piApp as any;
       if (api.generateSessionTitle) {
         api.generateSessionTitle(state.selectedWorkspaceId, state.selectedSessionId)
-          .then(() => api.getState().then((s: DesktopAppState) => setState(s)))
+          .then(() => api.getState().then((s: DesktopAppState) => applyState(s)))
           .catch((e: unknown) => console.error("[App] 标题生成失败:", e));
       }
     }
@@ -213,14 +226,14 @@ export default function App() {
     setTranscript(null);
     // 异步通知主进程（fire-and-forget，onStateChanged 会最终同步）
     window.piApp.selectSession({ workspaceId: state.selectedWorkspaceId, sessionId }).catch(() => {});
-  }, [state]);
+  }, [state, applyState]);
 
   // 归档会话（从列表收起，不删除数据）
   const archiveSession = useCallback(async (sessionId: string) => {
     if (!state) return;
     try {
       const s = await window.piApp.archiveSession({ workspaceId: state.selectedWorkspaceId, sessionId });
-      setState(s);
+      applyState(s);
     } catch (e) {
       console.error("[App] 归档会话失败:", e);
     }
@@ -231,34 +244,34 @@ export default function App() {
     if (!state) return;
     try {
       const s = await window.piApp.archiveSession({ workspaceId: state.selectedWorkspaceId, sessionId });
-      setState(s);
+      applyState(s);
     } catch (e) {
       console.error("[App] 删除会话失败:", e);
     }
-  }, [state]);
+  }, [state, applyState]);
 
   // 恢复归档会话
   const restoreSession = useCallback(async (sessionId: string) => {
     if (!state) return;
     try {
       const s = await window.piApp.unarchiveSession({ workspaceId: state.selectedWorkspaceId, sessionId });
-      setState(s);
+      applyState(s);
     } catch (e) {
       console.error("[App] 恢复会话失败:", e);
     }
-  }, [state]);
+  }, [state, applyState]);
 
   // 停止生成
   const cancelRun = useCallback(async () => {
     const s = await window.piApp.cancelCurrentRun();
-    setState(s);
-  }, []);
+    applyState(s);
+  }, [applyState]);
 
   // 切换主题
   const setTheme = useCallback(async (mode: "system" | "light" | "dark") => {
     const s = await window.piApp.setThemeMode(mode);
-    setState(s);
-  }, []);
+    applyState(s);
+  }, [applyState]);
 
   // 应用主题 class（light/dark）
   useEffect(() => {
@@ -420,7 +433,7 @@ export default function App() {
           onDeleteForever={async (id) => {
             if (!state) return;
             const s = await (window.piApp as any).deleteSessionForever(state.selectedWorkspaceId, id);
-            if (s) setState(s);
+            if (s) applyState(s);
           }}
           onClose={() => setShowArchive(false)}
         />
