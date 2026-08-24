@@ -16,6 +16,7 @@ import { defineTool, toolOk as okResult, toolErr as errResult, cwdFromContext, a
 import { readEntity, listEntities, entityDir, entityFile, ENTITY_TYPES, stringifyFrontmatter, listEntityTypes } from "./business-store";
 import { processInbox, searchCases, previewScan, importFiles, getCommonDocDirs, scanDocs } from "./knowledge-service";
 import { createWebFetchTool } from "./web-fetch-tool";
+import { createWebSearchTool } from "./web-search-tool";
 import { appendToLog, regenerateIndex, createWikiPage, updateWikiPage, findPageByTitle, readMemory, updateMemory, lintWiki, addCrossReference, createGoal, advanceGoal, updateGoalStatus, getActiveGoals, ingestText, ingestDocuments, discoverDomains, searchWiki, saveSynthesis, importLegacyWiki } from "./wiki-manager";
 import { readCardConfig, saveCardConfig } from "./card-config";
 import { getActiveWikiConfig, piUserDataDir } from "./wiki-config";
@@ -973,6 +974,7 @@ export function createBusinessTools() {
     createSearchCasesTool(),
     createInitScanTool(),
     createWebFetchTool(),
+    createWebSearchTool(),
     createCardTemplateTool(),
     createListCardTemplatesTool(),
     createRemoveCardTemplateTool(),

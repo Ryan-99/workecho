@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { RefreshCw, Plus, ChevronUp, ChevronDown, X, Zap, BookOpen, FileText, Link2, TrendingUp, Share2 } from "lucide-react";
 import * as LucideIcons from "lucide-react";
 import type { DesktopAppState } from "../desktop-state";
@@ -65,12 +65,27 @@ export function StatusPanel({ state, sidebarCollapsed, width, onResize }: Props)
     } catch { /* 静默降级 */ }
   };
 
+  // revision 变化防抖刷新：导入/连发工具时 revision 高频跳动，
+  // 直接刷新会触发 getWikiStats/getWikiGraph 全库扫描风暴（曾导致顶栏闪烁）
   useEffect(() => {
-    fetchAll();
-    fetchWikiStats();
-    const timer = setInterval(() => { fetchAll(); fetchWikiStats(); }, 10000);
+    if (sidebarCollapsed) return; // 收起时面板不可见，不拉数据
+    const t = setTimeout(() => {
+      fetchAll();
+      fetchWikiStats();
+    }, 500);
+    return () => clearTimeout(t);
+  }, [state.selectedWorkspaceId, state.selectedSessionId, state.revision, sidebarCollapsed]);
+
+  // 低频兜底轮询（与 revision 无关；依赖 collapsed 让闭包读到最新值）
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (sidebarCollapsed) return;
+      fetchAll();
+      fetchWikiStats();
+    }, 10000);
     return () => clearInterval(timer);
-  }, [state.selectedWorkspaceId, state.selectedSessionId, state.revision]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarCollapsed]);
 
   const handleAddCard = async (template: any) => {
     const newCard: CardConfig = {
@@ -124,10 +139,10 @@ export function StatusPanel({ state, sidebarCollapsed, width, onResize }: Props)
     setTimeout(fetchAll, 3000);
   };
 
-  if (sidebarCollapsed) return <aside className="status-panel collapsed" />;
-
+  // 收起时保持挂载（只切 class 走 CSS 过渡）——卸载重挂会导致重新拉数据+重建图谱，
+  // 展开动画因此卡顿；收起期间也不再发刷新请求
   return (
-    <aside className="status-panel" style={width ? { width } : {}}>
+    <aside className={`status-panel ${sidebarCollapsed ? "collapsed" : ""}`} style={width && !sidebarCollapsed ? { width } : {}}>
       {onResize && <div className="status-resize-handle" onMouseDown={onResize} />}
       <div className="status-panel-header">
         <h2>工作台概览</h2>
@@ -180,8 +195,8 @@ export function StatusPanel({ state, sidebarCollapsed, width, onResize }: Props)
   );
 }
 
-/** 固定卡片：Wiki 知识库概览（独立于普通卡片配置） */
-function WikiStatsCard({ stats }: {
+/** 固定卡片：Wiki 知识库概览（memo：stats 未变时不重渲染 SVG/统计块） */
+const WikiStatsCard = memo(function WikiStatsCard({ stats }: {
   stats: { totalPages: number; categories: Record<string, number>; crossReferences: number; recentUpdates: number };
 }) {
   return (
@@ -208,7 +223,7 @@ function WikiStatsCard({ stats }: {
       </div>
     </div>
   );
-}
+});
 
 /** P5 补全：知识图谱迷你可视化（SVG 径向布局：分类成簇，边为引用关系） */
 function WikiGraphCard({ graph }: {

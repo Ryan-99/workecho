@@ -3,7 +3,7 @@ import { appConfirm } from "./app-dialog";
 import {
   Plus, Trash2, Archive, Settings as SettingsIcon, Pin,
   ChevronRight, ChevronDown, FolderPlus, Folder, X, Clock, BookOpen } from "lucide-react";
-import type { SessionRecord } from "../desktop-state";
+import type { SessionRecord, OrchestrationChildThread } from "../desktop-state";
 
 interface SessionGroup {
   id: string;
@@ -18,6 +18,7 @@ interface GroupsConfig {
 
 interface Props {
   sessions: readonly SessionRecord[];
+  orchestrationChildren?: readonly OrchestrationChildThread[];
   activeSessionId: string;
   collapsed: boolean;
   archivedCount: number;
@@ -36,7 +37,7 @@ const UNCATEGORIZED = "__uncategorized__";
 const COLLAPSE_KEY = "sidebar-collapsed-groups";
 
 export function Sidebar({
-  sessions, activeSessionId, collapsed, archivedCount, workspaceId, width,
+  sessions, orchestrationChildren = [], activeSessionId, collapsed, archivedCount, workspaceId, width,
   onNewSession, onSelectSession, onArchiveSession, onDeleteSession,
   onOpenSettings, onOpenArchive, onResize,
 }: Props) {
@@ -105,15 +106,31 @@ export function Sidebar({
     setContextMenu(null);
   };
 
+  // 子线程父子映射（orchestration）：子会话嵌在父会话下展示，不再平铺
+  const childrenByParent = new Map<string, OrchestrationChildThread[]>();
+  const childSessionIds = new Set<string>();
+  for (const c of orchestrationChildren) {
+    const list = childrenByParent.get(c.parentSessionId) ?? [];
+    list.push(c);
+    childrenByParent.set(c.parentSessionId, list);
+    childSessionIds.add(c.childSessionId);
+  }
+  // 子会话不进平铺列表（在父行下渲染）；父会话不在列表的孤儿子会话保留平铺避免消失
+  const visibleSessions = sessions.filter((s) => !childSessionIds.has(s.id));
+
   // 按 group 分桶
   const buckets: Record<string, SessionRecord[]> = {};
   for (const g of groupsConfig.groups) buckets[g.id] = [];
   buckets[UNCATEGORIZED] = [];
-  for (const s of sessions) {
+  for (const s of visibleSessions) {
     const gid = groupsConfig.assignmentBySession[s.id];
     if (gid && buckets[gid]) buckets[gid].push(s);
     else buckets[UNCATEGORIZED].push(s);
   }
+  const orphanChildSessions = sessions.filter(
+    (s) => childSessionIds.has(s.id) && !visibleSessions.includes(s),
+  );
+  for (const s of orphanChildSessions) buckets[UNCATEGORIZED].push(s);
 
   if (collapsed) return <aside className="sidebar collapsed" />;
 
@@ -175,6 +192,7 @@ export function Sidebar({
             key={g.id}
             group={g}
             sessions={buckets[g.id] ?? []}
+            childrenByParent={childrenByParent}
             activeSessionId={activeSessionId}
             workspaceId={workspaceId}
             isCollapsed={collapsedGroups.has(g.id)}
@@ -195,6 +213,7 @@ export function Sidebar({
           <SessionGroupSection
             group={{ id: UNCATEGORIZED, name: "未分类", order: -1 }}
             sessions={buckets[UNCATEGORIZED] ?? sessions}
+            childrenByParent={childrenByParent}
             activeSessionId={activeSessionId}
             workspaceId={workspaceId}
             isCollapsed={collapsedGroups.has(UNCATEGORIZED)}
@@ -251,11 +270,12 @@ export function Sidebar({
 
 /** 单个分组区块 */
 function SessionGroupSection({
-  group, sessions, activeSessionId, workspaceId,
+  group, sessions, childrenByParent, activeSessionId, workspaceId,
   isCollapsed, onToggle, onRemove, onSelect, onArchive, onDelete, onContextMenu, isUncategorized,
 }: {
   group: SessionGroup;
   sessions: SessionRecord[];
+  childrenByParent: Map<string, OrchestrationChildThread[]>;
   activeSessionId: string;
   workspaceId: string;
   isCollapsed: boolean;
@@ -288,7 +308,9 @@ function SessionGroupSection({
             <SessionItemRow
               key={s.id}
               session={s}
+              childThreads={childrenByParent.get(s.id) ?? []}
               isActive={s.id === activeSessionId}
+              activeSessionId={activeSessionId}
               workspaceId={workspaceId}
               onSelect={onSelect}
               onArchive={onArchive}
@@ -302,12 +324,23 @@ function SessionGroupSection({
   );
 }
 
-/** 单条 session */
+/** 子线程状态徽标文案 */
+const CHILD_STATUS_LABEL: Record<string, string> = {
+  queued: "排队",
+  running: "运行中",
+  waiting: "等待",
+  complete: "完成",
+  failed: "失败",
+};
+
+/** 单条 session（含嵌套的 orchestration 子线程） */
 function SessionItemRow({
-  session: s, isActive, workspaceId, onSelect, onArchive, onDelete, onContextMenu,
+  session: s, childThreads = [], isActive, activeSessionId, workspaceId, onSelect, onArchive, onDelete, onContextMenu,
 }: {
   session: SessionRecord;
+  childThreads?: readonly OrchestrationChildThread[];
   isActive: boolean;
+  activeSessionId: string;
   workspaceId: string;
   onSelect: (id: string) => void;
   onArchive: (id: string) => void;
@@ -315,6 +348,7 @@ function SessionItemRow({
   onContextMenu: (e: React.MouseEvent, sessionId: string) => void;
 }) {
   return (
+    <div className={`session-item-wrap ${isActive ? "active" : ""}`}>
     <div
       className={`session-item ${isActive ? "active" : ""}`}
       onClick={() => onSelect(s.id)}
@@ -346,6 +380,26 @@ function SessionItemRow({
           }}
         ><Trash2 size={13} /></button>
       </div>
+    </div>
+    {childThreads.length > 0 && (
+      <div className="child-thread-list">
+        {childThreads.map((c) => (
+          <div
+            key={c.id}
+            className={`child-thread-item ${c.childSessionId === activeSessionId ? "active" : ""}`}
+            onClick={() => onSelect(c.childSessionId)}
+            title={c.goal || c.title}
+          >
+            <span className="child-thread-arrow">↳</span>
+            <span className="child-thread-title">{c.title || c.goal || "子任务"}</span>
+            <span className={`child-thread-status status-${c.status}`}>
+              {c.status === "running" && <span className="child-thread-pip" />}
+              {CHILD_STATUS_LABEL[c.status] ?? c.status}
+            </span>
+          </div>
+        ))}
+      </div>
+    )}
     </div>
   );
 }

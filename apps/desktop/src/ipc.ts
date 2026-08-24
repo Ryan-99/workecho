@@ -142,6 +142,7 @@ export const desktopIpc = {
   getChangedFiles: "pi-gui:get-changed-files",
   getFileDiff: "pi-gui:get-file-diff",
   stageFile: "pi-gui:stage-file",
+  discardFile: "pi-gui:discard-file",
   getThemeMode: "pi-gui:get-theme-mode",
   getResolvedTheme: "pi-gui:get-resolved-theme",
   setThemeMode: "pi-gui:set-theme-mode",
@@ -411,6 +412,7 @@ export interface PiDesktopApi {
   readWorkspaceFile(workspaceId: string, filePath: string): Promise<WorkspaceFilePreview>;
   getChangedFiles(workspaceId: string): Promise<ChangedFilesResult>;
   getFileDiff(workspaceId: string, filePath: string): Promise<string>;
+  discardFile(workspaceId: string, filePath: string): Promise<void>;
   stageFile(workspaceId: string, filePath: string, stagingSourcePath?: string): Promise<void>;
   toggleWindowMaximize(): Promise<void>;
   openExternal(url: string): Promise<void>;
@@ -459,6 +461,14 @@ export interface PiDesktopApi {
   saveWikiConfig(config: Record<string, unknown>): Promise<unknown>;
   patchWikiConfig(patch: Record<string, unknown>): Promise<unknown>;
   getWikiPages(): Promise<unknown>;
+  getPlanMode(): Promise<boolean>;
+  checkProviderHealth(providerId: string): Promise<{
+    providerId: string;
+    configured: boolean;
+    online: boolean | null;
+    message: string;
+  }>;
+  setPlanMode(on: boolean): Promise<boolean>;
   readWikiPage(relPath: string): Promise<unknown>;
   wikiSearch(query: string, limit?: number): Promise<unknown>;
   getWikiGraph(): Promise<unknown>;

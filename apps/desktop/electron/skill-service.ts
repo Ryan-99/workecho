@@ -64,6 +64,27 @@ export function createSkill(
   return { created: true, path: skillPath };
 }
 
+/**
+ * 安装应用内置的 Skill（resources/skills/*）到用户技能目录。
+ * 幂等：已存在同名 Skill 一律跳过（绝不覆盖用户/自学习产物）。
+ * 返回本次新安装的 Skill 名列表。
+ */
+export function installBundledSkills(resourcesDir: string): string[] {
+  const bundledRoot = path.join(resourcesDir, "skills");
+  if (!existsSync(bundledRoot)) return [];
+  const installed: string[] = [];
+  for (const entry of readdirSync(bundledRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (!existsSync(path.join(bundledRoot, entry.name, "SKILL.md"))) continue;
+    const target = skillDir(userSkillsRoot(), entry.name);
+    if (existsSync(path.join(target, "SKILL.md"))) continue; // 用户已有/自学习已生成 → 不动
+    mkdirSync(target, { recursive: true });
+    cpSync(path.join(bundledRoot, entry.name), target, { recursive: true });
+    installed.push(entry.name);
+  }
+  return installed;
+}
+
 /** 列出已安装 skill（解析 frontmatter） */
 export function listSkills(skillsBase: string): SkillInfo[] {
   if (!existsSync(skillsBase)) return [];

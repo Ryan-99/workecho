@@ -27,6 +27,7 @@ import {
 import { RuntimeSupervisor, type RuntimeSupervisorOptions } from "./runtime-supervisor.js";
 import { createRuntimeDependencies } from "./runtime-deps.js";
 import { generateThreadTitle, type GenerateThreadTitleOptions } from "./thread-title-generator.js";
+import { distillSkill, type DistillSkillOptions } from "./skill-distiller.js";
 
 export interface PiSdkDriverConfig extends PiSdkDriverOptions, RuntimeSupervisorOptions {}
 
@@ -176,6 +177,12 @@ export class PiSdkDriver implements SessionDriver {
     }
     const { agentDir, modelRuntime, modelRegistry } = await this.depsPromise;
     return generateThreadTitle(workspace, options, { agentDir, modelRuntime, modelRegistry });
+  }
+
+  /** 自学习蒸馏：一次性 LLM 调用，返回模型原始输出文本（JSON 判定），失败返回 null。 */
+  async distillSkill(workspace: WorkspaceRef, options: DistillSkillOptions): Promise<string | null> {
+    const { agentDir, modelRuntime, modelRegistry } = await this.depsPromise;
+    return distillSkill(workspace, options, { agentDir, modelRuntime, modelRegistry });
   }
 }
 

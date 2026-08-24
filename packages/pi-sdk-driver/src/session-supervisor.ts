@@ -168,7 +168,7 @@ interface PromptTemplateAdapter {
   readonly filePath?: string;
 }
 
-const NEW_THREAD_PLACEHOLDER_TITLE = "New thread";
+const NEW_THREAD_PLACEHOLDER_TITLE = "新会话";
 
 interface SkillAdapter {
   readonly name: string;
@@ -360,6 +360,31 @@ export class SessionSupervisor {
       record.listeners.clear();
       await this.disposeRecordRuntimeSafely(record);
       this.records.delete(key);
+    }
+  }
+
+  /**
+   * 真实 token 用量（pi 上游统计，非估算）：
+   * - context: 当前上下文占用（最近一次 LLM 响应的实际值；刚压缩后可能为 null）
+   * - sessionTotalTokens: 会话累计消耗（input+output+cache）
+   * 会话未运行时返回 null（调用方自行降级到估算）。
+   */
+  async getRealUsage(sessionRef: SessionRef): Promise<{
+    context: { tokens: number | null; contextWindow: number; percent: number | null } | null;
+    sessionTotalTokens: number | null;
+  } | null> {
+    const record = this.records.get(sessionKey(sessionRef));
+    const session = record?.session;
+    if (!session || record.closed) return null;
+    try {
+      const cu = (session as any).getContextUsage?.();
+      const stats = (session as any).getSessionStats?.();
+      return {
+        context: cu ? { tokens: cu.tokens ?? null, contextWindow: cu.contextWindow, percent: cu.percent ?? null } : null,
+        sessionTotalTokens: stats?.tokens?.total ?? null,
+      };
+    } catch {
+      return null;
     }
   }
 

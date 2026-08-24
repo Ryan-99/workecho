@@ -28,6 +28,7 @@ import {
   type OrchestrationRuntimeBridge,
 } from "./orchestration-runtime";
 import { createBusinessRuntimeExtension } from "./business-runtime";
+import { createBusinessTools } from "./business-runtime";
 import {
   PROVIDER_ID as COSTRICT_PROVIDER_ID, LOCAL_BASE_URL as COSTRICT_LOCAL_URL, DEFAULT_BASE_URL as COSTRICT_DEFAULT_URL,
   costrictLogin, costrictStart, costrictStop, costrictStatus, downloadBinary, installBundledBinary, fetchCostrictModels, readState as costrictReadState, writeState as costrictWriteState, setSecretCodec as setCostrictSecretCodec, managedBinaryPath,
@@ -35,7 +36,8 @@ import {
 import type { CustomProviderInput } from "@pi-gui/pi-sdk-driver";
 import { createPolicyExtension, setHookNotifier, setDangerousOpConfirmer } from "./tool-pipeline";
 import { createMemoryInjectionExtension } from "./memory-injection";
-import { updateMemory, getWikiStats, getWikiGraph, searchWiki, listWikiPages, readWikiPage } from "./wiki-manager";
+import { updateMemory, getWikiStats, getWikiGraph, searchWiki, listWikiPages, readWikiPage, appendToLog } from "./wiki-manager";
+import { isPlanMode, setPlanMode } from "./plan-mode";
 import { getBusinessSummary, getCardData, readEntity, entityFile } from "./business-store";
 import { createMcpExtension, summarizeMcpChanges } from "./mcp-client";
 import { readCardConfig, saveCardConfig, type CardConfig } from "./card-config";
@@ -44,7 +46,8 @@ import { readWikiConfig, writeWikiConfig, patchWikiConfig, getActiveWikiConfig, 
 import { ensureScheduleFile, readScheduleRules, addScheduleRule, removeScheduleRule } from "./schedule-service";
 import { readSessionGroups, createGroup, removeGroup, assignSessionToGroup } from "./session-groups";
 import { listPlugins, removePlugin, createPlugin } from "./plugin-service";
-import { createSkill, importSkill, userSkillsRoot } from "./skill-service";
+import { createSkill, importSkill, userSkillsRoot , installBundledSkills } from "./skill-service";
+import { createSelfLearningService } from "./self-learning";
 import { ensureHooksFile, readHookRules, addHookRule, removeHookRule } from "./hooks-service";
 import { setProgressWindowsProvider } from "./progress-broadcaster";
 import { initWorkspaceDir, runInitScan } from "./workbench-init";
@@ -53,7 +56,7 @@ import { readBusinessPrompt, writeBusinessPrompt, syncPromptToWorkspace } from "
 import { ReminderScheduler } from "./reminder-scheduler";
 import { TodoReminderService } from "./todo-reminder";
 import * as orchestrationTools from "./app-store-orchestration";
-import { getChangedFiles, getFileDiff, stageFile } from "./app-store-diff";
+import { getChangedFiles, getFileDiff, stageFile, discardFileChanges } from "./app-store-diff";
 import { listWorkspaceFiles, readWorkspaceFile } from "./app-store-files";
 import { MAIN_DEV_RELOAD_MARKER } from "./dev-reload-main-probe";
 import { NotificationManager } from "./notification-manager";
@@ -294,6 +297,13 @@ function getTerminalService(): TerminalService {
 const resourcesDir = app.isPackaged
   ? process.resourcesPath
   : path.join(__dirname, "..", "..", "resources");
+// 内置官方 Skill（如 skill-creator）安装到用户技能目录：幂等，绝不覆盖已有
+try {
+  const bundledInstalled = installBundledSkills(resourcesDir);
+  if (bundledInstalled.length > 0) console.log("[skills] 已安装内置技能:", bundledInstalled.join(", "));
+} catch (e) {
+  console.warn("[skills] 内置技能安装失败:", (e as Error).message);
+}
 const icoPath = path.join(resourcesDir, "icon.ico");
 const appIconPath = process.platform === "win32" && existsSync(icoPath)
   ? icoPath
@@ -336,6 +346,52 @@ function openExternalWebUrl(url: string): boolean {
     console.error(`Failed to open external URL: ${parsed.toString()}`, error);
   });
   return true;
+}
+
+/** 系统提示词 token 估算（按字符/4，进程内缓存） */
+let cachedSystemPromptTokens: number | null = null;
+function estimateSystemPromptTokens(): number {
+  if (cachedSystemPromptTokens == null) {
+    try {
+      cachedSystemPromptTokens = Math.ceil(readBusinessPrompt(configuredUserDataDir).length / 4);
+    } catch {
+      cachedSystemPromptTokens = 0;
+    }
+  }
+  return cachedSystemPromptTokens;
+}
+
+/** 工具定义 token 估算（41 个工具的 name/description/参数 schema，进程内缓存） */
+let cachedToolTokens: number | null = null;
+function estimateToolDefinitionTokens(): number {
+  if (cachedToolTokens == null) {
+    try {
+      const tools = createBusinessTools() as Array<Record<string, unknown>>;
+      cachedToolTokens = Math.ceil(
+        tools.reduce(
+          (sum, t) => sum + JSON.stringify({ name: t.name, description: t.description, parameters: t.parameters }).length,
+          0,
+        ) / 4,
+      );
+    } catch {
+      cachedToolTokens = 0;
+    }
+  }
+  return cachedToolTokens;
+}
+
+/** 对话内容 token 估算（消息 + 工具输入输出，按字符/4） */
+async function estimateTranscriptTokens(workspaceId: string, sessionId: string): Promise<number> {
+  const transcript: any = (store as any).getSelectedTranscriptForView
+    ? await (store as any).getSelectedTranscriptForView({ workspaceId, sessionId })
+    : null;
+  const messages = transcript?.transcript ?? [];
+  const totalChars = messages.reduce((sum: number, m: any) => {
+    if (m.kind === "message") return sum + (m.text?.length ?? 0);
+    if (m.kind === "tool") return sum + JSON.stringify(m.input ?? "").length + JSON.stringify(m.output ?? "").length;
+    return sum;
+  }, 0);
+  return Math.max(1, Math.ceil(totalChars / 4));
 }
 
 function readClipboardImageAttachment(): ComposerImageAttachment | null {
@@ -1254,6 +1310,33 @@ app.whenReady().then(async () => {
     generateThreadTitleOverride: async (workspace, options) => generateThreadTitleOverride?.(workspace, options),
   });
   await store.initialize();
+  // Agent 自学习（auto-skill）：run 结束后后台评估会话，可复用经验蒸馏成
+  // learned- Skill 沉淀。开关在 设置 → Wiki（selfLearningSkills，默认开），
+  // 服务内部有消息量阈值/每会话评估上限/全局串行，不会阻塞 UI。
+  const selfLearning = createSelfLearningService({
+    getConfig: () => getActiveWikiConfig(),
+    getWorkspacePath: (workspaceId) => store.getWorkspacePath(workspaceId),
+    getTranscript: (ref) => store.driver.getTranscript(ref as any),
+    distill: (ref, workspacePath, prompt) =>
+      store.driver.distillSkill(
+        { workspaceId: ref.workspaceId, path: workspacePath } as WorkspaceRef,
+        { prompt, signal: AbortSignal.timeout(120_000) },
+      ),
+    refreshRuntime: async (workspaceId) => {
+      const ws = store.workspaceRefFromState(workspaceId);
+      if (ws) await store.driver.runtimeSupervisor.refreshRuntime(ws);
+    },
+    log: (workspacePath, line) => appendToLog(workspacePath, line),
+    notify: (title, body) => {
+      try { new Notification({ title, body }).show(); } catch { /* 通知失败忽略 */ }
+    },
+    skillsBase: userSkillsRoot(),
+  });
+  store.subscribeToSessionEvents((event) => {
+    if (event.type === "runCompleted") {
+      void selfLearning.handleRunCompleted(event.sessionRef);
+    }
+  });
   themeManager.setMode(store.state.themeMode);
   // 工具进度广播：把主进程工具进度推给所有窗口
   setProgressWindowsProvider(() => BrowserWindow.getAllWindows());
@@ -1634,27 +1717,50 @@ app.whenReady().then(async () => {
     try {
       const st = store.state;
       const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
-      if (!ws) { console.log("[ctx-usage] no workspace"); return null; }
+      if (!ws) return null;
       const session = ws.sessions.find((s) => s.id === st.selectedSessionId);
-      if (!session) { console.log("[ctx-usage] no session"); return null; }
-      // 直接从 transcript 估算（不用 getSelectedTranscriptForView，避免 view 参数问题）
-      // 用 renderer 已有的 transcript data 更可靠，但 main 端需要自己读
-      // 改为从 store 的 transcript snapshot 取
-      const transcript: any = (store as any).getSelectedTranscriptForView
-        ? await (store as any).getSelectedTranscriptForView({ workspaceId: ws.id, sessionId: session.id })
-        : null;
-      const messages = transcript?.transcript ?? [];
-      const totalChars = messages.reduce((sum: number, m: any) => {
-        if (m.kind === "message") return sum + (m.text?.length ?? 0);
-        if (m.kind === "tool") return sum + JSON.stringify(m.input ?? "").length + JSON.stringify(m.output ?? "").length;
-        return sum;
-      }, 0);
-      const estimatedTokens = Math.max(1, Math.ceil(totalChars / 4));
+      if (!session) return null;
+
+      const sysTokens = estimateSystemPromptTokens();
+      const toolTokens = estimateToolDefinitionTokens();
       const runtime = st.runtimeByWorkspace[ws.id];
       const model = runtime?.models?.find((m: any) => m.available);
       const contextWindow = (model as any)?.contextWindow ?? 128000;
-      const percent = Math.round((estimatedTokens / contextWindow) * 100);
-      return { tokens: estimatedTokens, contextWindow, percent };
+
+      // 对话内容（消息+工具结果）：优先用真实值倒推（总量-系统-工具），否则按字符估算
+      let msgTokens: number;
+      let real = false;
+      let sessionTotalTokens: number | null = null;
+      try {
+        const realUsage = await store.driver.runtimeSupervisor.getRealUsage({ workspaceId: ws.id, sessionId: session.id });
+        if (realUsage?.context && realUsage.context.tokens != null) {
+          const total = realUsage.context.tokens;
+          msgTokens = Math.max(0, total - sysTokens - toolTokens);
+          sessionTotalTokens = realUsage.sessionTotalTokens;
+          real = true;
+        } else {
+          msgTokens = await estimateTranscriptTokens(ws.id, session.id);
+        }
+      } catch {
+        msgTokens = await estimateTranscriptTokens(ws.id, session.id);
+      }
+
+      const used = sysTokens + toolTokens + msgTokens;
+      const free = Math.max(0, contextWindow - used);
+      const pctOf = (t: number) => Math.round((t / contextWindow) * 100);
+      return {
+        tokens: used,
+        contextWindow,
+        percent: pctOf(used),
+        sessionTotalTokens,
+        real,
+        segments: [
+          { key: "system", tokens: sysTokens },
+          { key: "tools", tokens: toolTokens },
+          { key: "messages", tokens: msgTokens },
+          { key: "free", tokens: free },
+        ],
+      };
     } catch (e) { console.warn("[ctx-usage] error:", (e as Error).message); return null; }
   });
 
@@ -1726,6 +1832,38 @@ app.whenReady().then(async () => {
 
   // Phase 5: Wiki 知识图谱数据（graph view 用）
   // 知识库浏览页：页面列表 + 正文读取
+  // 计划模式：只读探索开关（tool-pipeline 里按工作区目录读取并否决写类工具）
+  ipcMain.handle("workbench:plan-mode", () => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    return ws ? isPlanMode(ws.path) : false;
+  });
+  // Provider 凭据健康检查（P1-7）：自定义=在线探测，内置=checkAuth 存在性，costrict=本地路由状态
+  ipcMain.handle("workbench:provider-health", async (_event, providerId: string) => {
+    if (providerId === "costrict") {
+      const status = await costrictStatus({ dir: costrictDir });
+      return {
+        providerId,
+        configured: Boolean(status.apiKeySaved),
+        online: status.serviceRunning ? true : false,
+        message: !status.apiKeySaved
+          ? "未登录"
+          : status.serviceRunning
+            ? "本地路由在线"
+            : "本地路由未运行（启动时会自动自愈）",
+      };
+    }
+    return store.driver.runtimeSupervisor.checkProviderHealth(providerId);
+  });
+
+  ipcMain.handle("workbench:plan-mode-set", (_event, on: boolean) => {
+    const st = store.state;
+    const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
+    if (!ws) return false;
+    setPlanMode(ws.path, on === true);
+    return on === true;
+  });
+
   ipcMain.handle("workbench:wiki-pages", async () => {
     const st = store.state;
     const ws = st.workspaces.find((w) => w.id === st.selectedWorkspaceId);
@@ -2204,6 +2342,13 @@ app.whenReady().then(async () => {
       await stageFile(workspacePath, filePath, { sourcePath: stagingSourcePath });
     },
   );
+  ipcMain.handle(desktopIpc.discardFile, async (_event, workspaceId: string, filePath: string) => {
+    const workspacePath = store.getWorkspacePath(workspaceId);
+    if (!workspacePath) {
+      throw new Error(`Unknown workspace: ${workspaceId}`);
+    }
+    await discardFileChanges(workspacePath, filePath);
+  });
   // 会话统计（token/cost/消息数）
   ipcMain.handle("workbench:get-session-stats", async () => {
     try {

@@ -8,20 +8,21 @@ export function ContextMeter({ state }: { state: DesktopAppState }) {
   return null;
 }
 
-/** 紧凑图标版：小圆环，hover 显示完整统计（token + 消息数 + 工具数） */
+/** 上下文水位：圆环照旧，悬浮卡片 = 分段堆叠条（系统/工具/对话/剩余）+ 图例 */
 export function ContextMeterIcon({ state }: { state: DesktopAppState }) {
-  const [usage, setUsage] = useState<{ tokens: number; contextWindow: number; percent: number } | null>(null);
-  const [stats, setStats] = useState<{ messageCount: number; toolCallCount: number; estimatedTokens: number } | null>(null);
+  const [usage, setUsage] = useState<{
+    tokens: number; contextWindow: number; percent: number; real?: boolean;
+    sessionTotalTokens?: number | null;
+    segments?: Array<{ key: string; tokens: number }>;
+  } | null>(null);
+  const [hovered, setHovered] = useState(false);
 
   useEffect(() => {
     let active = true;
     const fetch = async () => {
       try {
-        const [u, s] = await Promise.all([
-          (window as any).piApp?.getContextUsage?.(),
-          (window as any).piApp?.getSessionStats?.(),
-        ]);
-        if (active) { if (u) setUsage(u); if (s) setStats(s); }
+        const u = await (window as any).piApp?.getContextUsage?.();
+        if (active && u) setUsage(u);
       } catch {}
     };
     fetch();
@@ -29,28 +30,27 @@ export function ContextMeterIcon({ state }: { state: DesktopAppState }) {
     return () => { active = false; clearInterval(timer); };
   }, [state.selectedSessionId, state.revision]);
 
-  const isWarning = (usage?.percent ?? 0) > 70;
-  const isDanger = (usage?.percent ?? 0) > 85;
   const pct = usage?.percent ?? 0;
-  const fillWidth = Math.max(2, Math.min(pct, 100));
-  const color = isDanger ? "#c08b8b" : isWarning ? "#c4a97a" : "#8baab0";
-  const [hovered, setHovered] = useState(false);
+  const color = pct > 85 ? "#c08b8b" : pct > 70 ? "#c4a97a" : "#8baab0";
 
-  // 环形进度图（SVG）
+  // 圆环（与原版一致）
   const radius = 6;
   const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference - (fillWidth / 100) * circumference;
+  const dashOffset = circumference - (Math.max(2, Math.min(pct, 100)) / 100) * circumference;
 
-  const tooltipLines = [
-    usage ? `Token ${(usage.tokens / 1000).toFixed(1)}k / ${(usage.contextWindow / 1000).toFixed(0)}k (${pct}%)` : null,
-    stats ? `消息 ${stats.messageCount}` : null,
-    stats ? `工具 ${stats.toolCallCount}` : null,
-  ].filter(Boolean);
+  // 分段（莫兰迪色）
+  const SEG_STYLE: Record<string, { color: string; label: string }> = {
+    system: { color: "#a8b8a0", label: "系统提示词" },
+    tools: { color: "#b3a8bd", label: "工具定义" },
+    messages: { color: "#8baab0", label: "对话内容" },
+    free: { color: "var(--bg-muted)", label: "剩余空间" },
+  };
+  const window_ = usage?.contextWindow ?? 1;
+  const segs = (usage?.segments ?? []).filter((sg) => sg.tokens > 0);
 
   return (
     <span
-      className="context-icon"
-      style={{ display: "inline-flex", alignItems: "center", flexShrink: 0, opacity: 0.65, position: "relative" }}
+      className="context-meter"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -60,9 +60,37 @@ export function ContextMeterIcon({ state }: { state: DesktopAppState }) {
           strokeDasharray={circumference} strokeDashoffset={dashOffset} strokeLinecap="round"
           style={{ transition: "stroke-dashoffset 0.5s ease" }} />
       </svg>
-      {hovered && tooltipLines.length > 0 && (
-        <div className="context-tooltip">
-          {tooltipLines.map((line, i) => <div key={i}>{line}</div>)}
+      {hovered && usage && (
+        <div className="context-popover">
+          <div className="context-popover__head">
+            <span className="context-popover__title">上下文容量</span>
+            <span className="context-popover__head-pct">{Math.round(pct)}%</span>
+          </div>
+          {/* 总容量条：堆叠条——填充段=各构成色按占比拼接，留白=剩余 */}
+          <div className="context-popover__bar">
+            {segs.filter((sg) => sg.key !== "free").map((sg) => (
+              <span
+                key={sg.key}
+                className="context-popover__bar-seg"
+                style={{ width: `${Math.max((sg.tokens / window_) * 100, 0.6)}%`, background: SEG_STYLE[sg.key]?.color }}
+              />
+            ))}
+          </div>
+          <div className="context-popover__rows">
+            {segs.filter((sg) => sg.key !== "free").map((sg) => (
+              <span key={sg.key} className="context-popover__row-item">
+                <span className="context-popover__lg-dot" style={{ background: SEG_STYLE[sg.key]?.color }} />
+                <span className="context-popover__row-label">{SEG_STYLE[sg.key]?.label ?? sg.key}</span>
+                <span className="context-popover__row-bar">
+                  <span
+                    className="context-popover__row-bar-fill"
+                    style={{ width: `${Math.min(sg.tokens / window_ * 100, 100)}%`, background: SEG_STYLE[sg.key]?.color }}
+                  />
+                </span>
+                <span className="context-popover__lg-pct">{Math.round((sg.tokens / window_) * 100)}%</span>
+              </span>
+            ))}
+          </div>
         </div>
       )}
     </span>

@@ -291,6 +291,8 @@ contextBridge.exposeInMainWorld("piApp", {
     ipcRenderer.invoke(desktopIpc.getFileDiff, workspaceId, filePath) as Promise<string>,
   stageFile: (workspaceId: string, filePath: string, stagingSourcePath?: string) =>
     ipcRenderer.invoke(desktopIpc.stageFile, workspaceId, filePath, stagingSourcePath) as Promise<void>,
+  discardFile: (workspaceId: string, filePath: string) =>
+    ipcRenderer.invoke(desktopIpc.discardFile, workspaceId, filePath) as Promise<void>,
   toggleWindowMaximize: () => ipcRenderer.invoke(desktopIpc.toggleWindowMaximize) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke(desktopIpc.openExternal, url) as Promise<void>,
   getThemeMode: () => ipcRenderer.invoke(desktopIpc.getThemeMode) as Promise<"system" | "light" | "dark">,
@@ -390,6 +392,12 @@ contextBridge.exposeInMainWorld("piApp", {
   },
   getWikiStats: () => ipcRenderer.invoke("workbench:wiki-stats"),
   getWikiGraph: () => ipcRenderer.invoke("workbench:wiki-graph"),
+  checkProviderHealth: (providerId: string) =>
+    ipcRenderer.invoke("workbench:provider-health", providerId) as Promise<{
+      providerId: string; configured: boolean; online: boolean | null; message: string;
+    }>,
+  getPlanMode: () => ipcRenderer.invoke("workbench:plan-mode") as Promise<boolean>,
+  setPlanMode: (on: boolean) => ipcRenderer.invoke("workbench:plan-mode-set", on) as Promise<boolean>,
   getWikiPages: () => ipcRenderer.invoke("workbench:wiki-pages"),
   readWikiPage: (relPath: string) => ipcRenderer.invoke("workbench:wiki-read-page", relPath),
   wikiSearch: (query: string, limit?: number) => ipcRenderer.invoke("workbench:wiki-search", query, limit),

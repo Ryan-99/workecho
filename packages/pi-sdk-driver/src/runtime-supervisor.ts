@@ -166,6 +166,56 @@ export class RuntimeSupervisor implements RuntimeResourceDriver {
     return customProviderStore.list();
   }
 
+  /**
+   * Provider 凭据健康检查（P1-7）：
+   * - 自定义 OpenAI 兼容：用存储的 key 真实打一次 GET {baseUrl}/models（10s 超时）
+   * - pi 内置：checkAuth 凭据存在性/格式校验（无网络验证，online=null）
+   */
+  async checkProviderHealth(providerId: string): Promise<{
+    providerId: string;
+    configured: boolean;
+    online: boolean | null;
+    message: string;
+  }> {
+    const { modelRuntime, customProviderStore } = await this.deps();
+    // 自定义 OpenAI 兼容：在线验证
+    try {
+      const customs = await customProviderStore.list();
+      const custom = customs.find((c) => c.providerId === providerId);
+      if (custom && typeof custom.baseUrl === "string" && custom.baseUrl) {
+        const key = typeof custom.apiKey === "string" ? custom.apiKey : "";
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(new Error("timeout")), 10_000);
+        try {
+          const resp = await fetch(custom.baseUrl.replace(/\/+$/, "") + "/models", {
+            headers: key ? { Authorization: `Bearer ${key}` } : {},
+            signal: controller.signal,
+          });
+          return {
+            providerId,
+            configured: true,
+            online: resp.ok,
+            message: resp.ok ? "在线验证通过" : `服务返回 HTTP ${resp.status}`,
+          };
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+    } catch (e) {
+      return { providerId, configured: true, online: false, message: `连接失败: ${(e as Error).message}` };
+    }
+    // pi 内置：凭据存在性
+    const check = await modelRuntime.checkAuth(providerId).catch(() => undefined);
+    return {
+      providerId,
+      configured: check !== undefined,
+      online: null,
+      message: check
+        ? `已配置（${check.type === "oauth" ? "OAuth 登录" : "API Key"}，未在线验证）`
+        : "未配置凭据",
+    };
+  }
+
   async setCustomProvider(workspace: WorkspaceRef, input: CustomProviderInput): Promise<RuntimeSnapshot> {
     const { modelRuntime } = await this.deps();
     const oauthProviderIds = new Set(

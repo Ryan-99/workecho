@@ -1,4 +1,4 @@
-import { Sun, Moon, Monitor, Plus, Trash2, KeyRound, LogIn, LogOut, Check, Loader, Palette, Cloud, FileText, Puzzle, Info, Cpu, Zap, BookOpen, Clock, Sparkles, Plug, Terminal, X, Webhook, Upload } from "lucide-react";
+import { Sun, Moon, Monitor, Plus, Trash2, KeyRound, LogIn, LogOut, Check, Loader, Palette, Cloud, FileText, Puzzle, Info, Cpu, Zap, BookOpen, Clock, Sparkles, Plug, Terminal, X, Webhook, Upload, Activity } from "lucide-react";
 
 export const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; icon: React.ReactNode }> = [
   { id: "appearance", label: "外观", icon: <Palette size={14} /> },
@@ -130,6 +130,38 @@ function ProvidersSection({ state }: { state: DesktopAppState }) {
   );
 }
 
+/** Provider 健康检测按钮（P1-7）：自定义=在线探测，内置=凭据存在性 */
+function ProviderHealthCheck({ providerId }: { providerId: string }) {
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<{ online: boolean | null; message: string } | null>(null);
+
+  const run = async () => {
+    setChecking(true);
+    setResult(null);
+    try {
+      const r = await window.piApp.checkProviderHealth(providerId);
+      setResult({ online: r.online, message: r.message });
+    } catch (e) {
+      setResult({ online: false, message: (e as Error).message });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <span className="provider-health">
+      <button className="btn-ghost" onClick={run} disabled={checking} title="检测该 Provider 的凭据与连接状态">
+        {checking ? <Loader size={12} className="spin" /> : <Activity size={12} />} 检测
+      </button>
+      {result && (
+        <span className={`provider-health__msg ${result.online === false ? "is-bad" : ""}`}>
+          {result.online === true ? "● " : result.online === false ? "○ " : ""}{result.message}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function OAuthProviderRow({ provider, wsId }: { provider: RuntimeProviderRecord; wsId: string }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -154,6 +186,7 @@ function OAuthProviderRow({ provider, wsId }: { provider: RuntimeProviderRecord;
         {provider.hasAuth && <span className="provider-badge connected"><Check size={10} /> 已连接</span>}
       </div>
       <div className="provider-actions">
+        <ProviderHealthCheck providerId={provider.id} />
         {provider.hasAuth ? (
           <button className="btn-ghost" onClick={handleLogout} disabled={pending}>
             {pending ? <Loader size={12} className="spin" /> : <LogOut size={12} />} 断开
@@ -216,6 +249,7 @@ function ApiKeyProviderRow({ provider, wsId }: { provider: RuntimeProviderRecord
           </>
         ) : (
           <>
+            <ProviderHealthCheck providerId={provider.id} />
             <button className="btn-ghost" onClick={() => setEditing(true)}><KeyRound size={12} /> {provider.hasAuth ? "更换 Key" : "配置 Key"}</button>
             {provider.hasAuth && <button className="btn-ghost" onClick={handleRemove} disabled={pending}>移除</button>}
           </>
@@ -538,6 +572,7 @@ interface WikiConfigState {
   dailyBriefingTime: string;
   selfModifyPlugins: boolean;
   pluginCreateConfirm: boolean;
+  selfLearningSkills: boolean;
   ingestAutoCrossRef: boolean;
   discoverThreshold: number;
   showWikiStatsCard: boolean;
@@ -646,6 +681,19 @@ function WikiSettingsSection() {
         <div className="settings-row">
           <label>创建插件时需用户确认代码</label>
           <Toggle checked={config.pluginCreateConfirm} onChange={(v) => patch({ pluginCreateConfirm: v })} />
+        </div>
+      </section>
+
+      {/* Agent 自学习 */}
+      <section className="settings-section">
+        <h2>Agent 自学习</h2>
+        <p className="hint" style={{ marginBottom: 12 }}>
+          对话结束后自动评估是否出现可复用的流程或偏好，蒸馏成 Skill 沉淀（learned- 前缀，
+          在「技能」标签页可查看/停用）。每次沉淀会记录到 wiki 日志并弹桌面通知。
+        </p>
+        <div className="settings-row">
+          <label>自动从对话沉淀 Skill</label>
+          <Toggle checked={config.selfLearningSkills} onChange={(v) => patch({ selfLearningSkills: v })} />
         </div>
       </section>
 
@@ -921,7 +969,7 @@ function AboutSection() {
   return (
     <section className="settings-section">
       <h2>关于</h2>
-      <div className="settings-row"><label>版本</label><span className="hint">Workbench (基于 pi-gui)</span></div>
+      <div className="settings-row"><label>版本</label><span className="hint">Workecho</span></div>
       <div className="settings-row"><label>平台</label><span className="hint">{window.piApp.platform}</span></div>
       <div className="settings-row" style={{ paddingTop: 12 }}>
         <label>更新</label>

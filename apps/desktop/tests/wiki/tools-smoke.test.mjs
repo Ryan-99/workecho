@@ -37,9 +37,9 @@ afterEach(() => {
   cleanupWorkspace(root);
 });
 
-test("冒烟: 40 个工具全部注册且可加载", () => {
+test("冒烟: 41 个工具全部注册且可加载", () => {
   const tools = createBusinessTools();
-  assert.equal(tools.length, 40);
+  assert.equal(tools.length, 41);
   for (const t of tools) assert.ok(t.name && t.description && typeof t.execute === "function");
 });
 

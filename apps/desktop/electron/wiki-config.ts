@@ -41,6 +41,10 @@ export interface WikiConfig {
   /** 创建插件时需要用户确认代码 */
   pluginCreateConfirm: boolean;
 
+  // ── Agent 自学习 ──
+  /** 对话结束后自动评估并沉淀可复用 Skill（learned- 前缀） */
+  selfLearningSkills: boolean;
+
   // ── 知识摄取 ──
   /** 摄取文档时自动建立交叉引用 */
   ingestAutoCrossRef: boolean;
@@ -69,6 +73,7 @@ export const DEFAULT_WIKI_CONFIG: WikiConfig = {
   dailyBriefingTime: "09:00",
   selfModifyPlugins: false,
   pluginCreateConfirm: true,
+  selfLearningSkills: true,
   ingestAutoCrossRef: true,
   discoverThreshold: 3,
   showWikiStatsCard: true,

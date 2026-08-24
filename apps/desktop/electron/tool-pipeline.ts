@@ -6,7 +6,7 @@
  * - EXECUTE: 实际工具执行（由 pi runtime 负责）
  * - POST: 结果存入 wiki、更新 index/log、触发通知/刷新
  *
- * 策略引擎（isDangerousOp/shouldPersistResult/auditToolCall）可独立测试。
+ * 策略引擎（isDangerousOp/auditToolCall）可独立测试。
  * createPolicyExtension 返回 ExtensionFactory，注册 pi 事件钩子。
  */
 import path from "node:path";
@@ -14,6 +14,7 @@ import { PI_EVENTS, type ExtensionFactory } from "./pi-compat";
 import { appendToLog } from "./wiki-manager";
 import { getActiveWikiConfig } from "./wiki-config";
 import { readHookRules, matchHookRules } from "./hooks-service";
+import { isPlanMode, isMutationTool, PLAN_MODE_VETO_REASON } from "./plan-mode";
 
 /** Hook 通知器：由 main.ts 注入（Electron Notification）。策略层不直接依赖 electron，测试可注入 mock。 */
 let hookNotifier: ((title: string, body: string) => void) | null = null;
@@ -73,11 +74,6 @@ const READONLY_TOOLS = new Set([
   "wiki_query", "wiki_discover_domains", "init_scan",
 ]);
 
-/** 结果应该自动存入 wiki 的工具 */
-const PERSIST_TOOLS = new Set([
-  "wiki_ingest", "wiki_query", "wiki_save_synthesis", "web_fetch",
-]);
-
 /**
  * 判断操作是否危险（需要用户确认）。
  * 规则：
@@ -113,13 +109,6 @@ export function isDangerousOp(toolName: string, params: Record<string, unknown>)
     return true;
   }
   return false;
-}
-
-/**
- * 判断工具结果是否应该自动存入 wiki。
- */
-export function shouldPersistResult(toolName: string): boolean {
-  return PERSIST_TOOLS.has(toolName);
 }
 
 /**
@@ -191,16 +180,16 @@ export function preExecute(
 }
 
 /**
- * POST-EXECUTE 处理器：结果审计 + 判断是否需要存入 wiki。
+ * POST-EXECUTE 处理器：结果审计。
+ * （入库不在这里做——wiki_ingest 等工具自身写库，wiki_query 由提示词引导回写洞察。）
  */
 export function postExecute(
   workspaceDir: string,
   toolName: string,
   params: Record<string, unknown>,
   result: unknown,
-): { shouldPersist: boolean } {
+): void {
   auditToolCall(workspaceDir, toolName, params, result, "result");
-  return { shouldPersist: shouldPersistResult(toolName) };
 }
 
 /**
@@ -258,6 +247,11 @@ export function createPolicyExtension(): ExtensionFactory {
         try {
           const config = getConfig();
           const cwd = ctx?.cwd ?? (pi as any).cwd ?? process.cwd();
+          // 计划模式（独立于 pipelineEnabled，属于用户意图开关）：只读探索，否决一切写类工具
+          if (isPlanMode(cwd) && isMutationTool(event.toolName, event.input)) {
+            appendToLog(cwd, `plan_mode_block | ${event.toolName}`);
+            return { block: true, reason: PLAN_MODE_VETO_REASON };
+          }
           // 审计管道受 pipelineEnabled 门控；Hook 规则独立（仅受 hooksEnabled 门控，在 applyHooks 内检查）
           if (!config || config.pipelineEnabled) {
             const pre = preExecute(cwd, event.toolName, event.input);
@@ -315,6 +309,6 @@ export function createPolicyExtension(): ExtensionFactory {
     }
 
     // 提供 preExecute/postExecute 给其他扩展调用
-    (pi as any).pipeline = { preExecute, postExecute, isDangerousOp, shouldPersistResult, applyHooks };
+    (pi as any).pipeline = { preExecute, postExecute, isDangerousOp, applyHooks };
   };
 }

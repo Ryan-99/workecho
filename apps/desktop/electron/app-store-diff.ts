@@ -128,6 +128,29 @@ export async function stageFile(
   }
 }
 
+export interface DiscardFileOptions {
+  readonly executeGit?: GitCommandExecutor;
+}
+
+/**
+ * 丢弃单个已跟踪文件的工作区改动（git checkout -- file）。
+ * 仅适用于状态为 M/D 的已跟踪文件；未跟踪/新增文件不在此列（避免误删用户文件）。
+ */
+export async function discardFileChanges(
+  workspacePath: string,
+  filePath: string,
+  options: DiscardFileOptions = {},
+): Promise<void> {
+  resolveWorkspacePath(workspacePath, filePath);
+  const result = await (options.executeGit ?? executeGitCommand)(
+    ["--literal-pathspecs", "checkout", "--", filePath],
+    { cwd: workspacePath },
+  );
+  if (result.error) {
+    throw result.error;
+  }
+}
+
 function executeGitCommand(
   args: readonly string[],
   options: GitCommandOptions,

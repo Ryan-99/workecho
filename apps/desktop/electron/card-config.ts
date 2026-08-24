@@ -25,29 +25,8 @@ export interface CardConfig {
   template: "preset" | "custom";
 }
 
-/** 预定义模板 */
+/** 可选模板（"+"添加）：OKR 按需手动加；维保/KA/项目等业务卡一律让 Agent 用 create_card_template 建 */
 export const PRESET_TEMPLATES: Omit<CardConfig, "id">[] = [
-  {
-    title: "OKR 进展",
-    icon: "Target",
-    entityType: "okr",
-    displayFields: ["title", "progress", "status"],
-    fieldLabels: { title: "目标", progress: "进度", status: "状态" },
-    sortBy: "progress",
-    sortDesc: true,
-    limit: 5,
-    template: "preset",
-  },
-  {
-    title: "维保续费",
-    icon: "ShieldCheck",
-    entityType: "maintenance",
-    displayFields: ["customer", "product", "expireDate", "status", "amount"],
-    fieldLabels: { customer: "客户", product: "产品", expireDate: "到期", status: "状态", amount: "金额" },
-    sortBy: "expireDate",
-    limit: 10,
-    template: "preset",
-  },
   {
     title: "待办事项",
     icon: "CheckSquare",
@@ -60,28 +39,26 @@ export const PRESET_TEMPLATES: Omit<CardConfig, "id">[] = [
     template: "preset",
   },
   {
-    title: "KA 客户",
-    icon: "Users",
-    entityType: "ka",
-    displayFields: ["name", "tier", "status"],
-    fieldLabels: { name: "客户", tier: "等级", status: "状态" },
-    limit: 10,
-    template: "preset",
-  },
-  {
-    title: "重点项目",
-    icon: "FolderKanban",
-    entityType: "projects",
-    displayFields: ["title", "status"],
-    fieldLabels: { title: "项目", status: "状态" },
+    title: "OKR 进展",
+    icon: "Target",
+    entityType: "okr",
+    displayFields: ["title", "progress", "status"],
+    fieldLabels: { title: "目标", progress: "进度", status: "状态" },
+    sortBy: "progress",
+    sortDesc: true,
     limit: 5,
     template: "preset",
   },
 ];
 
+/** 首次初始化默认只装待办事项；OKR 等其余卡片用户手动添加或让 AI 创建 */
+const DEFAULT_CARD_TITLES = new Set(["待办事项"]);
+
 /** 默认卡片配置（首次启动写入） */
 function defaultCards(): CardConfig[] {
-  return PRESET_TEMPLATES.map((t, i) => ({ ...t, id: `preset-${i}` }));
+  return PRESET_TEMPLATES
+    .filter((t) => DEFAULT_CARD_TITLES.has(t.title))
+    .map((t, i) => ({ ...t, id: `preset-${i}` }));
 }
 
 const CONFIG_FILE = "card-config.json";
@@ -99,10 +76,37 @@ export function readCardConfig(userDataDir: string): CardConfig[] {
     return defaults;
   }
   try {
-    return JSON.parse(readFileSync(file, "utf-8"));
+    let cards: CardConfig[] = JSON.parse(readFileSync(file, "utf-8"));
+    cards = migrateLegacyKaCard(userDataDir, cards);
+    return cards;
   } catch {
     return defaultCards();
   }
+}
+
+/**
+ * 旧版 KA 卡迁移：早期预设绑定 ka 类型（displayFields 为 name/tier/status），
+ * 但 ka 实体（旧业务数据迁移）没有名称字段，卡片渲染为空行。
+ * 统一升级为 customers（旧知识库导入的客户档案，有 title）。
+ */
+function migrateLegacyKaCard(userDataDir: string, cards: CardConfig[]): CardConfig[] {
+  let changed = false;
+  const next = cards.map((c) => {
+    if (c.entityType === "ka" && Array.isArray(c.displayFields) && c.displayFields.includes("name")) {
+      changed = true;
+      return {
+        ...c,
+        entityType: "customers",
+        displayFields: ["title"],
+        fieldLabels: { title: "客户" },
+      };
+    }
+    return c;
+  });
+  if (changed) {
+    try { saveCardConfig(userDataDir, next); } catch { /* 迁移写回失败不阻塞读取 */ }
+  }
+  return next;
 }
 
 /** 保存卡片配置 */

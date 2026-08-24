@@ -23,6 +23,7 @@ export { RUNTIME_SCHEMA_VERSION } from "./session-schema.js";
 export type { SessionSchemaInfo } from "./session-schema.js";
 export { sessionKey } from "./session-supervisor-utils.js";
 export type { GenerateThreadTitleOptions } from "./thread-title-generator.js";
+export type { DistillSkillOptions } from "./skill-distiller.js";
 export type {
   SessionTranscriptAttachment,
   SessionTranscriptItem,

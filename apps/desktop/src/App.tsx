@@ -6,6 +6,7 @@ import type { SelectedTranscriptRecord } from "./desktop-state";
 import type { PiDesktopApi } from "./ipc";
 import { Sidebar } from "./shell/Sidebar";
 import { ChatPanel } from "./shell/ChatPanel";
+import { appConfirm, appAlert } from "./shell/app-dialog";
 import { StatusPanel } from "./shell/StatusPanel";
 import { SettingsView, SETTINGS_TABS, type SettingsTab } from "./shell/SettingsView";
 import { WelcomeView } from "./shell/WelcomeView";
@@ -51,6 +52,32 @@ export default function App() {
     window.addEventListener("open-wiki-manager", handler);
     return () => window.removeEventListener("open-wiki-manager", handler);
   }, []);
+
+  // 从消息重开分支（P1-6）：时间线 hover 触发，走上游 forkThread（本地 fork）
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const messageId = (e as CustomEvent<{ messageId?: string }>).detail?.messageId;
+      const st = state;
+      if (!messageId || !st?.selectedWorkspaceId || !st.selectedSessionId) return;
+      const wsId = st.selectedWorkspaceId;
+      const sid = st.selectedSessionId;
+      const ok = await appConfirm("从这条消息重开分支？将创建一个新会话，保留到这条消息为止的上下文，之后的内容不带过去。");
+      if (!ok) return;
+      try {
+        await window.piApp.forkThread({
+          sourceWorkspaceId: wsId,
+          sourceSessionId: sid,
+          rootWorkspaceId: wsId,
+          environment: "local",
+          sourceMessageId: messageId,
+        });
+      } catch (err) {
+        appAlert(`创建分支失败: ${(err as Error).message}`);
+      }
+    };
+    window.addEventListener("fork-from-message", handler as EventListener);
+    return () => window.removeEventListener("fork-from-message", handler as EventListener);
+  }, [state]);
   const [showTerminal, setShowTerminal] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(252);
@@ -347,6 +374,7 @@ export default function App() {
         <>
           <Sidebar
             sessions={sessions}
+            orchestrationChildren={state.orchestrationChildren}
             activeSessionId={state.selectedSessionId}
             collapsed={state.sidebarCollapsed}
             workspaceId={state.selectedWorkspaceId}

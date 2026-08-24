@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import { ensureWikiStructure } from "../../electron/wiki-manager.ts";
 import {
   isDangerousOp,
-  shouldPersistResult,
   auditToolCall,
   PipelineDecision,
   createPolicyExtension,
@@ -42,21 +41,6 @@ test("isDangerousOp: query 类工具不危险", () => {
   assert.ok(!isDangerousOp("query_okr", {}));
   assert.ok(!isDangerousOp("wiki_search", { query: "test" }));
   assert.ok(!isDangerousOp("wiki_read_memory", {}));
-});
-
-/* ===== shouldPersistResult ===== */
-
-test("shouldPersistResult: query 类工具结果不自动存", () => {
-  assert.ok(!shouldPersistResult("query_okr"));
-  assert.ok(!shouldPersistResult("wiki_search"));
-});
-
-test("shouldPersistResult: wiki_ingest 结果应该存", () => {
-  assert.ok(shouldPersistResult("wiki_ingest"));
-});
-
-test("shouldPersistResult: wiki_query 结果应该存（综合分析）", () => {
-  assert.ok(shouldPersistResult("wiki_query"));
 });
 
 /* ===== auditToolCall ===== */

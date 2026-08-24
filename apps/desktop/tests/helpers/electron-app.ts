@@ -422,7 +422,7 @@ export async function resolvePackagedAppBundle(releaseDir = packagedReleaseDir):
   } catch (error) {
     if (isMissingPathError(error)) {
       throw new Error(
-        `Packaged release directory not found: ${releaseDir}. Run pnpm --filter @pi-gui/desktop run package:dir first.`,
+        `Packaged release directory not found: ${releaseDir}. Run pnpm --filter @workecho/desktop run package:dir first.`,
       );
     }
     throw error;
@@ -430,7 +430,7 @@ export async function resolvePackagedAppBundle(releaseDir = packagedReleaseDir):
 
   const appBundle = appBundles.find((candidate) => basename(candidate) === "pi-gui.app") ?? appBundles[0];
   if (!appBundle) {
-    throw new Error(`No .app bundle found under ${releaseDir}. Run pnpm --filter @pi-gui/desktop run package:dir first.`);
+    throw new Error(`No .app bundle found under ${releaseDir}. Run pnpm --filter @workecho/desktop run package:dir first.`);
   }
 
   return appBundle;
@@ -463,7 +463,7 @@ export async function resolvePackagedReleaseZip(releaseDir = packagedReleaseDir)
     entries.find((entry) => entry.isFile() && entry.name.endsWith(".zip"));
 
   if (!zipEntry) {
-    throw new Error(`No packaged macOS release zip found under ${releaseDir}. Run pnpm --filter @pi-gui/desktop run package first.`);
+    throw new Error(`No packaged macOS release zip found under ${releaseDir}. Run pnpm --filter @workecho/desktop run package first.`);
   }
 
   return join(releaseDir, zipEntry.name);

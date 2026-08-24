@@ -16,6 +16,8 @@ extraResources:
     to: icon.png
   - from: resources/costrict
     to: costrict
+  - from: resources/skills
+    to: skills
 
 asar: true
 asarUnpack:
@@ -44,7 +46,7 @@ mac:
 
 linux:
   category: Development
-  executableName: pi-gui
+  executableName: workecho
   maintainer: Matthew Lam <minghinmatthew.lam@gmail.com>
   vendor: pi-gui
   synopsis: Codex-style desktop app for the pi coding agent
@@ -76,7 +78,7 @@ deb:
     - libgbm1
 
 win:
-  executableName: pi-gui
+  executableName: workecho
   signAndEditExecutable: true
   target:
     - target: nsis
