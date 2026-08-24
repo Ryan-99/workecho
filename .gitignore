@@ -29,3 +29,11 @@ index.html
 # Vite hashed build output (anywhere)
 *-[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9].js
 *-[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9].css
+
+# 本地过程文件（计划/审核草稿/宣传页），只留本地不推送
+audit/
+plans/
+workecho-intro.html
+review/findings.md
+review/task_plan.md
+review/progress.md
