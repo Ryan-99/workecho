@@ -28,15 +28,24 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # C-02：发布门禁——单测 + 版本一致性（tag 必须与 package.json 匹配；
+      # 不再用 extraMetadata.version 强改产物版本掩盖漂移）
+      - run: pnpm --filter @workecho/desktop run test:unit
+      - name: Verify release version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: pnpm verify:release-version --tag "$GITHUB_REF_NAME"
       - run: pnpm typecheck
       - run: pnpm --filter @workecho/desktop run build
       - name: Package Windows (installer + portable)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
-        run: pnpm --filter @workecho/desktop exec electron-builder --win nsis portable --publish never --config.npmRebuild=false "-c.extraMetadata.version=${GITHUB_REF_NAME#v}"
+        run: pnpm --filter @workecho/desktop exec electron-builder --win nsis portable --publish never --config.npmRebuild=false
       - name: Package Windows (installer + portable, manual)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: pnpm --filter @workecho/desktop exec electron-builder --win nsis portable --publish never --config.npmRebuild=false
+      - name: Verify packaged runtime dependencies
+        run: pnpm --dir apps/desktop run verify:packaged-runtime-deps:windows
       - uses: actions/upload-artifact@v4
         with:
           name: workecho-windows
@@ -54,6 +63,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @workecho/desktop run test:unit
+      - name: Verify release version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: pnpm verify:release-version --tag "$GITHUB_REF_NAME"
       - run: pnpm typecheck
       - run: pnpm --filter @workecho/desktop run build
       - name: Package macOS (dmg + zip)
@@ -61,12 +74,14 @@ jobs:
         shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: pnpm --filter @workecho/desktop exec electron-builder --mac dmg zip --publish never --config.npmRebuild=false "-c.extraMetadata.version=${GITHUB_REF_NAME#v}"
+        run: pnpm --filter @workecho/desktop exec electron-builder --mac dmg zip --publish never --config.npmRebuild=false
       - name: Package macOS (dmg + zip, manual)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: pnpm --filter @workecho/desktop exec electron-builder --mac dmg zip --publish never --config.npmRebuild=false
+      - name: Verify packaged runtime dependencies
+        run: PI_APP_PACKAGE_PLATFORM=darwin pnpm --dir apps/desktop run verify:packaged-runtime-deps
       - uses: actions/upload-artifact@v4
         with:
           name: workecho-macos
@@ -88,3 +103,5 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+          # C-11：tag 含 "-"（如 v0.1.0-beta.34）视为预发布，不抢占正式 Latest
+          prerelease: ${{ contains(github.ref_name, '-') }}

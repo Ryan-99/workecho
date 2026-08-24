@@ -41,8 +41,8 @@ proof_dir="${3:-$release_dir/linux-package-proof}"
 mkdir -p "$proof_dir"
 proof_dir="$(cd "$proof_dir" && pwd)"
 
-appimage="$release_dir/pi-gui-$version-x86_64.AppImage"
-deb="$release_dir/pi-gui_${version}_amd64.deb"
+appimage="$release_dir/Workecho-$version-x86_64.AppImage"
+deb="$release_dir/Workecho_${version}_amd64.deb"
 debian_version="$(normalize_debian_version "$version")"
 required_dependencies=(
   "libgtk-3-0 | libgtk-3-0t64"
@@ -68,7 +68,7 @@ temporary_root="$(mktemp -d)"
 package_installed=false
 cleanup() {
   if $package_installed; then
-    sudo env DEBIAN_FRONTEND=noninteractive apt-get purge -y pi-gui \
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get purge -y workecho \
       >"$proof_dir/emergency-remove.log" 2>&1 || true
   fi
   rm -rf "$temporary_root"
@@ -99,7 +99,7 @@ verify_appimage() {
   )
 
   local extracted="$extract_root/squashfs-root"
-  for executable in "$extracted/AppRun" "$extracted/pi-gui"; do
+  for executable in "$extracted/AppRun" "$extracted/workecho"; do
     if [[ ! -x "$executable" ]]; then
       echo "AppImage is missing executable payload: $executable" >&2
       exit 1
@@ -110,7 +110,7 @@ verify_appimage() {
     exit 1
   fi
 
-  readelf -h "$extracted/pi-gui" | tee "$proof_dir/appimage-app-elf-header.txt"
+  readelf -h "$extracted/workecho" | tee "$proof_dir/appimage-app-elf-header.txt"
   grep -F "Advanced Micro Devices X86-64" "$proof_dir/appimage-app-elf-header.txt"
 }
 
@@ -316,7 +316,7 @@ verify_install_upgrade_launch_remove() {
     exit 1
   fi
 
-  sudo env DEBIAN_FRONTEND=noninteractive apt-get purge -y pi-gui \
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get purge -y workecho \
     2>&1 | tee "$proof_dir/remove.log"
   package_installed=false
 

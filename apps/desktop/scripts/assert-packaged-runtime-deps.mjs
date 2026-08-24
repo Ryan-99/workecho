@@ -91,7 +91,43 @@ const notificationHelperPath =
     : undefined;
 const pnpmBinary = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const piCodingAgentPackageName = "@earendil-works/pi-coding-agent";
-const requiredPiCodingAgentVersion = "0.80.6";
+// C-06：允许版本从 apps/desktop/package.json 的依赖声明推导（^x.y.z 范围），
+// 升级 pi-coding-agent 后无需手工同步本脚本（历史事故：0.80.6 硬编码 vs 实际 ^0.84.2）。
+const desktopDependencySpec = String(
+  JSON.parse(readFileSync(path.join(desktopDir, "package.json"), "utf8"))
+    .dependencies?.[piCodingAgentPackageName] ?? "",
+);
+if (!desktopDependencySpec) {
+  throw new Error(
+    `apps/desktop/package.json does not declare a dependency on ${piCodingAgentPackageName}; cannot derive the expected version.`,
+  );
+}
+const requiredPiCodingAgentVersion = desktopDependencySpec;
+
+/** 简化 semver 比较：installed 是否落在 spec（支持 ^/~ / 精确）允许的范围内。 */
+function versionSatisfiesSpec(installed, spec) {
+  const strip = (v) => v.trim().replace(/^[vr=]+/, "");
+  const parse = (v) =>
+    strip(v)
+      .split(/[.+-]/)
+      .map((part) => Number.parseInt(part, 10));
+  const exact = strip(spec).replace(/^[~^]/, "");
+  const [specMajor, specMinor = 0, specPatch = 0] = parse(exact);
+  const [major, minor = 0, patch = 0] = parse(installed);
+  if ([major, minor, patch].some((n) => Number.isNaN(n))) return false;
+  if (spec.startsWith("^")) {
+    if (major !== specMajor) return false;
+    // npm 语义：0.x 系列的 ^ 锁 minor（^0.84.2 = >=0.84.2 <0.85.0）
+    if (specMajor === 0) {
+      return minor === specMinor && patch >= specPatch;
+    }
+    return minor > specMinor || (minor === specMinor && patch >= specPatch);
+  }
+  if (spec.startsWith("~")) {
+    return major === specMajor && minor === specMinor && patch >= specPatch;
+  }
+  return strip(installed) === exact;
+}
 const modelChecks = [
   ...["luna", "sol", "terra"].map((variant) => ({
     provider: "openai-codex",
@@ -210,9 +246,9 @@ function verifyRequiredPackages(extractedDir) {
 async function verifyPackagedPiRuntime(extractedDir) {
   const packageJsonPath = path.join(extractedDir, "node_modules", ...piCodingAgentPackageName.split("/"), "package.json");
   const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-  if (packageJson.version !== requiredPiCodingAgentVersion) {
+  if (!versionSatisfiesSpec(packageJson.version, requiredPiCodingAgentVersion)) {
     throw new Error(
-      `Packaged app has ${piCodingAgentPackageName} ${packageJson.version}; expected ${requiredPiCodingAgentVersion}.`,
+      `Packaged app has ${piCodingAgentPackageName} ${packageJson.version}; expected a version satisfying ${requiredPiCodingAgentVersion} (from apps/desktop/package.json).`,
     );
   }
 

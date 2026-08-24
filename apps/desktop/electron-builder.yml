@@ -61,7 +61,7 @@ linux:
 
 deb:
   artifactName: ${productName}_${version}_${arch}.${ext}
-  packageName: pi-gui
+  packageName: workecho
   packageCategory: devel
   priority: optional
   afterRemove: resources/linux/after-remove.sh

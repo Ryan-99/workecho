@@ -66,6 +66,10 @@ node --import ./tests/wiki/ts-resolver.mjs --test --experimental-strip-types \
 
 # 6. typecheck 改过的文件 + pnpm dev 起来人工过一遍：
 #    发消息 / 工具调用 / Hook 拦截 / 停止按钮
+
+# 7. 产物校验（打包后运行；pi-coding-agent 期望版本自动从
+#    apps/desktop/package.json 依赖声明推导，无需手工同步——历史事故 C-06）
+pnpm --dir apps/desktop run verify:packaged-runtime-deps:windows
 ```
 
 ## 版本策略

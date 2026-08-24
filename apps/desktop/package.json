@@ -5,7 +5,7 @@
   "author": "Matthew Lam",
   "license": "MIT",
   "description": "Codex-style desktop shell for pi",
-  "homepage": "https://github.com/minghinmatthewlam/pi-gui",
+  "homepage": "https://github.com/Ryan-99/workecho",
   "main": "out/main/main.js",
   "scripts": {
     "build:deps": "pnpm --dir ../.. --filter @pi-gui/session-driver --filter @pi-gui/pi-sdk-driver --filter @pi-gui/catalogs run build",

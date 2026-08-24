@@ -11,7 +11,7 @@
     "package:win": "pnpm --filter @workecho/desktop run package:win",
     "package:win:dir": "pnpm --filter @workecho/desktop run package:win:dir",
     "lint": "pnpm -r --if-present lint",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm -r --if-present --no-bail test",
     "e2e": "playwright test",
     "test:homebrew-tap": "node scripts/test-update-homebrew-tap.mjs",
     "test:release-helpers": "node --test apps/desktop/scripts/release-artifacts.test.mjs apps/desktop/scripts/github-release-state.test.mjs apps/desktop/scripts/verify-linux-release.test.mjs scripts/verify-release-version.test.mjs",

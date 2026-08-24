@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - "workecho/**"
   pull_request:
 
 concurrency:
@@ -27,21 +28,46 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # C-01 防呆：--filter 匹配不到包时 pnpm 静默 exit 0（历史事故：包改名后 CI 全部空转假绿）。
+      # 任一 filter 解析不到对应目录即硬失败。
+      - name: Assert workspace filters resolve
+        run: |
+          node -e "
+          const { execSync } = require('node:child_process');
+          const path = require('node:path');
+          const root = process.cwd();
+          const expected = ['apps/desktop', 'packages/pi-sdk-driver', 'apps/website'];
+          const out = execSync(
+            'pnpm --filter @workecho/desktop --filter @pi-gui/pi-sdk-driver --filter @pi-gui/website exec pwd',
+            { encoding: 'utf8' },
+          );
+          const hits = out
+            .split(/\r?\n/)
+            .filter(Boolean)
+            .map((l) => l.trim().split(path.sep).join('/'));
+          for (const dir of expected) {
+            if (!hits.some((h) => h.endsWith(dir))) {
+              console.error('filter did not resolve to ' + dir + '\n' + out);
+              process.exit(1);
+            }
+          }
+          console.log('filters ok');
+          "
+
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Wiki unit tests (Workecho 228-case suite)
-        run: pnpm --filter @pi-gui/desktop run test:unit
+      - name: Wiki unit tests (Workecho 292-case suite)
+        run: pnpm --filter @workecho/desktop run test:unit
 
       - name: Driver unit tests
         run: pnpm --filter @pi-gui/pi-sdk-driver test
 
       - name: Changed-file adapter tests
-        run: pnpm --filter @pi-gui/desktop run test:changed-files
+        run: pnpm --filter @workecho/desktop run test:changed-files
 
-      - name: Verify install copy
-        run: pnpm verify:install-copy
-
+      # install-copy 校验的是 pi-gui 上游官网/Homebrew 文案——Workecho 不发布 website，
+      # 脚本保留在上游遗产中（scripts/verify-install-copy.mjs），不在本仓库门禁运行
       - name: Verify dev launcher argv/PATH contract
         run: pnpm --dir apps/desktop run verify:launcher-contract
 
@@ -90,7 +116,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Desktop Core
-        run: pnpm --filter @pi-gui/desktop run test:e2e:ci:mac
+        run: pnpm --filter @workecho/desktop run test:e2e:ci:mac
 
       - name: Upload failure artifacts
         if: failure()
@@ -121,7 +147,7 @@ jobs:
         run: pnpm verify:release-config
 
       - name: Package Linux AppImage and deb
-        run: pnpm --filter @pi-gui/desktop run package:linux
+        run: pnpm --filter @workecho/desktop run package:linux
 
       - name: Verify packaged runtime dependencies
         run: pnpm --dir apps/desktop run verify:packaged-runtime-deps:linux
@@ -183,10 +209,10 @@ jobs:
         run: pnpm --dir apps/desktop run verify:launcher-contract
 
       - name: Changed-file adapter tests
-        run: pnpm --filter @pi-gui/desktop run test:changed-files
+        run: pnpm --filter @workecho/desktop run test:changed-files
 
       - name: Package Windows directory
-        run: pnpm --filter @pi-gui/desktop run package:win:dir
+        run: pnpm --filter @workecho/desktop run package:win:dir
 
       - name: Verify packaged runtime dependencies
         run: pnpm --dir apps/desktop run verify:packaged-runtime-deps:windows
