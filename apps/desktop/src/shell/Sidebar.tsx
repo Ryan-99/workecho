@@ -178,7 +178,7 @@ export function Sidebar({
           </div>
         ) : (
           <button className="group-add-btn" onClick={() => setCreatingGroup(true)}>
-            <Plus size={10} /> 新建分组
+            <FolderPlus size={11} /> 新建分组
           </button>
         )}
 
@@ -291,7 +291,6 @@ function SessionGroupSection({
     <div className={`session-group ${isCollapsed ? "collapsed" : ""}`}>
       <div className="session-group-header" onClick={onToggle}>
         {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-        <Folder size={12} style={{ opacity: 0.6 }} />
         <span className="session-group-name">{group.name}</span>
         <span className="session-group-count">{sessions.length}</span>
         {!isUncategorized && (

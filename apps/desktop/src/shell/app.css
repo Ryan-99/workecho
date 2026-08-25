@@ -337,39 +337,42 @@ body {
 /* ═══ 分组列表 ═══ */
 .group-add-btn {
   width: 100%;
-  padding: 3px 8px;
-  margin: 2px 0 6px;
+  padding: 4px 10px;
+  margin: 2px 0 8px;
   background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-muted);
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
   justify-content: center;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.group-add-btn:hover { background: var(--bg-hover); color: var(--text); }
+.group-add-btn:hover { background: var(--bg-hover); color: var(--text-secondary); border-color: var(--text-muted); }
+.group-add-btn svg { flex-shrink: 0; }
 
 .group-create-inline { margin: 4px 0 8px; }
 .group-name-input {
   width: 100%;
-  padding: 5px 10px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
   font-size: 12px;
   background: var(--bg);
   color: var(--text);
   outline: none;
+  transition: border-color 0.15s;
 }
+.group-name-input:focus { border-color: var(--text-muted); }
 
 .session-group { margin-bottom: 2px; }
 .session-group-header {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   padding: 5px 8px;
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -382,6 +385,7 @@ body {
   transition: background 0.12s;
 }
 .session-group-header:hover { background: var(--bg-hover); }
+.session-group-header > svg:first-child { flex-shrink: 0; }
 .session-group-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-group-count {
   font-size: 10px;
@@ -396,14 +400,15 @@ body {
   opacity: 0;
   background: none;
   border: none;
+  border-radius: 4px;
   cursor: pointer;
   color: var(--text-muted);
   padding: 2px;
   display: flex;
-  transition: opacity 0.12s, color 0.12s;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
 }
 .session-group-header:hover .session-group-del { opacity: 1; }
-.session-group-del:hover { color: var(--danger); }
+.session-group-del:hover { color: var(--danger); background: var(--danger-bg); }
 .session-group-body { padding: 0 0 2px; }
 .session-group-body .session-item { padding-left: 24px; }
 
@@ -2726,39 +2731,42 @@ pre.tool-compact {
 /* ═══ 分组列表 ═══ */
 .group-add-btn {
   width: 100%;
-  padding: 3px 8px;
-  margin: 2px 0 6px;
+  padding: 4px 10px;
+  margin: 2px 0 8px;
   background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-muted);
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
   justify-content: center;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.group-add-btn:hover { background: var(--bg-hover); color: var(--text); }
+.group-add-btn:hover { background: var(--bg-hover); color: var(--text-secondary); border-color: var(--text-muted); }
+.group-add-btn svg { flex-shrink: 0; }
 
 .group-create-inline { margin: 4px 0 8px; }
 .group-name-input {
   width: 100%;
-  padding: 5px 10px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
   font-size: 12px;
   background: var(--bg);
   color: var(--text);
   outline: none;
+  transition: border-color 0.15s;
 }
+.group-name-input:focus { border-color: var(--text-muted); }
 
 .session-group { margin-bottom: 2px; }
 .session-group-header {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   padding: 5px 8px;
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -2771,6 +2779,7 @@ pre.tool-compact {
   transition: background 0.12s;
 }
 .session-group-header:hover { background: var(--bg-hover); }
+.session-group-header > svg:first-child { flex-shrink: 0; }
 .session-group-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-group-count {
   font-size: 10px;
@@ -2785,14 +2794,15 @@ pre.tool-compact {
   opacity: 0;
   background: none;
   border: none;
+  border-radius: 4px;
   cursor: pointer;
   color: var(--text-muted);
   padding: 2px;
   display: flex;
-  transition: opacity 0.12s, color 0.12s;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
 }
 .session-group-header:hover .session-group-del { opacity: 1; }
-.session-group-del:hover { color: var(--danger); }
+.session-group-del:hover { color: var(--danger); background: var(--danger-bg); }
 .session-group-body { padding: 0 0 2px; }
 .session-group-body .session-item { padding-left: 24px; }
 
