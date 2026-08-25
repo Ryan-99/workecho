@@ -63,13 +63,23 @@ export default function App() {
       const sid = st.selectedSessionId;
       const ok = await appConfirm("从这条消息重开分支？将创建一个新会话，保留到这条消息为止的上下文，之后的内容不带过去。");
       if (!ok) return;
+      // fork 校验匹配的是 pi 会话分支条目 id，而时间线对无 id 消息会展示合成 id
+      // （assistant-N）——两套 id 空间不通用。驱动层支持按"渲染消息序号"定位
+      // 分支条目（findBranchEntryForRenderedMessageIndex），优先用它；transcript
+      // 不可用时退回 messageId。
+      const rendered = (transcript?.transcript ?? []).filter(
+        (item): item is Extract<typeof item, { kind: "message" }> => item.kind === "message",
+      );
+      const renderedIndex = rendered.findIndex((item) => item.id === messageId);
       try {
         await window.piApp.forkThread({
           sourceWorkspaceId: wsId,
           sourceSessionId: sid,
           rootWorkspaceId: wsId,
           environment: "local",
-          sourceMessageId: messageId,
+          // 与旧 fork-modal 语义一致：包含所选消息（before 会把它丢掉）
+          position: "after",
+          ...(renderedIndex >= 0 ? { sourceMessageIndex: renderedIndex } : { sourceMessageId: messageId }),
         });
       } catch (err) {
         appAlert(`创建分支失败: ${(err as Error).message}`);
@@ -77,7 +87,7 @@ export default function App() {
     };
     window.addEventListener("fork-from-message", handler as EventListener);
     return () => window.removeEventListener("fork-from-message", handler as EventListener);
-  }, [state]);
+  }, [state, transcript]);
   const [showTerminal, setShowTerminal] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(252);
