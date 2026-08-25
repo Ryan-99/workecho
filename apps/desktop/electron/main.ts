@@ -33,7 +33,6 @@ import {
   PROVIDER_ID as COSTRICT_PROVIDER_ID, LOCAL_BASE_URL as COSTRICT_LOCAL_URL, DEFAULT_BASE_URL as COSTRICT_DEFAULT_URL,
   costrictLogin, costrictStart, costrictKeyReset, costrictRestart, costrictStop, costrictStatus, downloadBinary, installBundledBinary, fetchCostrictModels, readState as costrictReadState, writeState as costrictWriteState, setSecretCodec as setCostrictSecretCodec, managedBinaryPath, waitHealthy as waitCostrictHealthy,
 } from "./costrict-service";
-import type { CustomProviderInput } from "@pi-gui/pi-sdk-driver";
 import { createPolicyExtension, setHookNotifier, setDangerousOpConfirmer } from "./tool-pipeline";
 import { createMemoryInjectionExtension } from "./memory-injection";
 import { updateMemory, getWikiStats, getWikiGraph, searchWiki, listWikiPages, readWikiPage, appendToLog } from "./wiki-manager";
@@ -1311,6 +1310,23 @@ app.whenReady().then(async () => {
     generateThreadTitleOverride: async (workspace, options) => generateThreadTitleOverride?.(workspace, options),
   });
   await store.initialize();
+  // CoStrict 补注册自愈：老版本存在「登录成功但注册被静默跳过」的坏状态（登录时
+  // 无选中工作区），models.json 里没有 costrict 条目，右下角永远「无可用模型」。
+  // store 就绪后检测：key 已存 + provider 缺失 → 拉起服务并用存量 key 补注册。
+  void (async () => {
+    try {
+      const st = await costrictStatus({ dir: costrictDir });
+      if (!st.binaryPresent || !st.apiKeySaved) return;
+      const customs = await store.driver.runtimeSupervisor.listCustomProviders();
+      if (customs.some((c) => c.providerId === COSTRICT_PROVIDER_ID)) return;
+      if (!st.serviceRunning) {
+        const r = await costrictStart({ dir: costrictDir, binPath: managedBinaryPath(costrictDir) });
+        if (!r.healthy) return;
+      }
+      const apiKey = costrictReadState(costrictDir).apiKey;
+      if (apiKey) await registerCostrictProvider(apiKey);
+    } catch { /* 静默：登录/状态查询路径还会再试 */ }
+  })();
   // Agent 自学习（auto-skill）：run 结束后后台评估会话，可复用经验蒸馏成
   // learned- Skill 沉淀。开关在 设置 → Wiki（selfLearningSkills，默认开），
   // 服务内部有消息量阈值/每会话评估上限/全局串行，不会阻塞 UI。
@@ -1721,7 +1737,9 @@ app.whenReady().then(async () => {
       // 5. 注册 provider + 热刷新
       await opts.callbacks?.onProgress?.("注册 CoStrict 模型...");
       const registered = await registerCostrictProvider(apiKey);
-      if (!registered) return { ok: false, error: "已登录并启动，但获取模型列表失败（服务端模型为空？）" };
+      if (!registered.ok) {
+        return { ok: false, error: registered.error ?? "已登录并启动，但获取模型列表失败（服务端模型为空？）" };
+      }
       return { ok: true };
     } catch (e) {
       return { ok: false, error: (e as Error).message };
@@ -1729,25 +1747,47 @@ app.whenReady().then(async () => {
   }
 
   /** 把本地代理注册为 pi 自定义 Provider 并刷新运行时 */
-  async function registerCostrictProvider(apiKey: string): Promise<boolean> {
+  async function registerCostrictProvider(apiKey: string): Promise<{ ok: boolean; error?: string }> {
     try {
       // 注意：本地回环请求用 Node 原生 fetch——net.fetch 走 Chromium 网络栈，
       // 会受系统代理规则影响请求 127.0.0.1（实测 ERR），GitHub 下载才需要 net.fetch
       const models = await fetchCostrictModels({ apiKey });
-      if (models.length === 0) return false;
-      const input: CustomProviderInput = {
+      if (models.length === 0) return { ok: false };
+      // 引导页等场景可能尚无选中工作区：回落到第一个工作区。再没有就直接报错——
+      // 之前这里静默跳过注册，登录显示成功但 models.json 从未写入，右下角永远「无可用模型」
+      const workspaceId = store.state.selectedWorkspaceId ?? store.state.workspaces[0]?.id;
+      const ws = workspaceId ? store.workspaceRefFromState(workspaceId) : undefined;
+      if (!ws) {
+        return { ok: false, error: "暂无工作区可注册模型，请先进入一个工作区后重试" };
+      }
+      // 走 store 层（而非直调 supervisor）：setCustomProvider 会把新 RuntimeSnapshot
+      // 写入 runtimeByWorkspace 并广播给渲染层，模型选择器才能立即刷新出模型列表
+      await store.setCustomProvider(workspaceId, {
         providerId: COSTRICT_PROVIDER_ID,
         baseUrl: COSTRICT_LOCAL_URL,
         apiKey,
         models,
-      };
-      const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
-      if (ws) await store.driver.runtimeSupervisor.setCustomProvider(ws, input);
-      if (ws) await store.driver.runtimeSupervisor.refreshRuntime(ws);
-      return true;
+      });
+      // 默认请求模型：当前默认缺失或已不可用时，取 CoStrict 第一个可用模型顶上
+      const snapshot = store.runtimeByWorkspace.get(ws.workspaceId);
+      const settings = snapshot?.settings;
+      const defaultStillAvailable = Boolean(
+        settings?.defaultProvider
+        && settings.defaultModelId
+        && snapshot?.models.some(
+          (m) => m.available && m.providerId === settings.defaultProvider && m.modelId === settings.defaultModelId,
+        ),
+      );
+      const firstCostrict = snapshot?.models.find(
+        (m) => m.available && m.providerId === COSTRICT_PROVIDER_ID,
+      );
+      if (!defaultStillAvailable && firstCostrict) {
+        await store.setDefaultModel(workspaceId, firstCostrict.providerId, firstCostrict.modelId);
+      }
+      return { ok: true };
     } catch (e) {
       console.warn("[costrict] 注册 provider 失败:", (e as Error).message);
-      return false;
+      return { ok: false };
     }
   }
 
@@ -1756,9 +1796,8 @@ app.whenReady().then(async () => {
     try { await costrictStop(managedBinaryPath(costrictDir)); } catch { /* 服务可能未运行 */ }
     costrictWriteState(costrictDir, { apiKey: undefined });
     try {
-      const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
-      if (ws) await store.driver.runtimeSupervisor.deleteCustomProvider(ws, COSTRICT_PROVIDER_ID);
-      if (ws) await store.driver.runtimeSupervisor.refreshRuntime(ws);
+      const workspaceId = store.state.selectedWorkspaceId ?? store.state.workspaces[0]?.id;
+      if (workspaceId) await store.deleteCustomProvider(workspaceId, COSTRICT_PROVIDER_ID);
     } catch { /* ignore */ }
   }
 
