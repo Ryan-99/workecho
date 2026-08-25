@@ -16,6 +16,11 @@ export {
 } from "./runtime-supervisor.js";
 export type { PiSdkDriverOptions, SyncWorkspaceResult } from "./session-supervisor.js";
 export type { CustomProviderInput, CustomProviderEntry, CustomProviderModelInput } from "./custom-provider-types.js";
+export {
+  WORKECHO_APPEND_SYSTEM_PROMPT,
+  appendWorkechoIdentity,
+  composeAppendSystemPromptWithWorkechoIdentity,
+} from "./workecho-identity.js";
 export { SessionSupervisor } from "./session-supervisor.js";
 export { SessionLeasedError } from "./session-lease.js";
 export type { LeaseInfo } from "./session-lease.js";

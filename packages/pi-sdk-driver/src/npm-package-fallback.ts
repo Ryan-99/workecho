@@ -13,6 +13,8 @@ import {
 
 export interface PiResourceLoaderOptions {
   readonly extensionFactories?: ExtensionFactory[];
+  /** 追加到 system prompt 末尾的内容（上游 DefaultResourceLoaderOptions 同名选项透传） */
+  readonly appendSystemPromptOverride?: (base: string[]) => string[];
 }
 
 export interface PiCreateAgentSessionOptions extends CreateAgentSessionOptions {

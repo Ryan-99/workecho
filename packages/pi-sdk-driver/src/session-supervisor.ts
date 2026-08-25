@@ -98,6 +98,7 @@ import {
   createAgentSessionRuntimeWithNpmFallback,
   type PiCreateAgentSessionOptions,
 } from "./npm-package-fallback.js";
+import { composeAppendSystemPromptWithWorkechoIdentity } from "./workecho-identity.js";
 import { createRuntimeDependencies } from "./runtime-deps.js";
 
 export interface PiSdkDriverOptions {
@@ -202,6 +203,12 @@ export class SessionSupervisor {
           resourceLoaderOptions: {
             ...(createOptions as PiCreateAgentSessionOptions | undefined)?.resourceLoaderOptions,
             ...(options.extensionFactories ? { extensionFactories: [...options.extensionFactories] } : {}),
+            // Workecho 身份注入：所有会话的 system prompt 末尾追加产品身份声明，
+            // 压过上游默认 prompt 里的 pi 自述/ pi 设置引导（见 workecho-identity.ts）
+            appendSystemPromptOverride: composeAppendSystemPromptWithWorkechoIdentity(
+              (createOptions as PiCreateAgentSessionOptions | undefined)?.resourceLoaderOptions
+                ?.appendSystemPromptOverride,
+            ),
           },
         }));
     this.depsPromise = options.runtimeDeps ?? createRuntimeDependencies(options);

@@ -26,6 +26,7 @@ import type {
 } from "@pi-gui/session-driver/runtime-types";
 import type { WorkspaceRef } from "@pi-gui/session-driver";
 import { createSettingsManagerWithoutNpmPackages, isGlobalNpmLookupError } from "./npm-package-fallback.js";
+import { appendWorkechoIdentity } from "./workecho-identity.js";
 import { skillSlashCommand } from "./runtime-command-utils.js";
 import { ModelRuntime, ModelRegistry, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { createRuntimeDependencies, type RuntimeDependencies } from "./runtime-deps.js";
@@ -428,6 +429,7 @@ export class RuntimeSupervisor implements RuntimeResourceDriver {
       agentDir: (await this.deps()).agentDir,
       settingsManager,
       extensionFactories: [...this.extensionFactories],
+      appendSystemPromptOverride: appendWorkechoIdentity,
     });
     try {
       await resourceLoader.reload();
@@ -458,6 +460,7 @@ export class RuntimeSupervisor implements RuntimeResourceDriver {
         agentDir: (await this.deps()).agentDir,
         settingsManager,
         extensionFactories: [...this.extensionFactories],
+        appendSystemPromptOverride: appendWorkechoIdentity,
       });
       await resourceLoader.reload();
     }
