@@ -125,3 +125,39 @@ test("wiki page opens from the sidebar and plan-mode toggle reflects in the comp
     await harness.close();
   }
 });
+
+test("compact-session confirm gate and context meter popover work on the shell composer", async () => {
+  test.setTimeout(120_000);
+  const userDataDir = await makeUserDataDir("shell-smoke-3-");
+  const workspacePath = await makeWorkspace("shell-smoke-c8-workspace");
+  const harness = await launchDesktop(userDataDir, {
+    initialWorkspaces: [workspacePath],
+    testMode: "background",
+  });
+
+  try {
+    const window = await harness.firstWindow();
+    const workspace = await waitForWorkspaceByPath(window, workspacePath);
+    await createSessionDirect(window, workspace.id, "C8 thread");
+    await expect(window.locator(".session-item", { hasText: "C8 thread" })).toBeVisible({ timeout: 20_000 });
+
+    // C-08：压缩会话——+ 菜单 → 应用内确认弹窗（取消路径，不实际压缩空会话）
+    await window.locator(".composer-plus .composer__icon-btn").click();
+    await window.locator(".composer-plus-menu button", { hasText: "压缩会话" }).click();
+    const dialog = window.locator(".app-dialog");
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await expect(dialog).toContainText("压缩会话上下文");
+    await dialog.locator(".app-dialog__btn", { hasText: "取消" }).first().click();
+    await expect(dialog).toHaveCount(0);
+
+    // C-08：上下文用量圆环——常驻可见，悬浮出现容量明细
+    const meter = window.locator(".context-meter");
+    await expect(meter).toBeVisible();
+    await meter.hover();
+    const popover = window.locator(".context-popover");
+    await expect(popover).toBeVisible({ timeout: 10_000 });
+    await expect(popover).toContainText("上下文容量");
+  } finally {
+    await harness.close();
+  }
+});

@@ -1910,3 +1910,31 @@ export async function createSessionViaIpc(window: Page, workspaceIdOrPath: strin
 
   await expect(window.locator(".session-row__select", { hasText: title })).toBeVisible({ timeout: 15_000 });
 }
+
+/**
+ * 直接经 IPC 建会话并等待其成为选中会话（shell UI 断言版本）。
+ * 与 createSessionViaIpc 的区别：不依赖旧 UI 的 .session-row__select 选择器，
+ * 侧栏行断言由调用方按 shell UI（.session-item）自行决定。
+ */
+export async function createSessionIpc(window: Page, workspaceIdOrPath: string, title: string): Promise<void> {
+  await window.evaluate(async ({ workspaceTarget, targetTitle }) => {
+    const app = (window as PiAppWindow).piApp;
+    if (!app) {
+      throw new Error("piApp IPC bridge is unavailable");
+    }
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const state = await app.getState();
+      const workspace = state.workspaces.find((entry) => entry.id === workspaceTarget || entry.path === workspaceTarget);
+      if (workspace) {
+        await app.createSession({ workspaceId: workspace.id, title: targetTitle });
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+    }
+    throw new Error(`Workspace not found: ${workspaceTarget}`);
+  }, { workspaceTarget: workspaceIdOrPath, targetTitle: title });
+  await expect
+    .poll(async () => (await getDesktopState(window)).selectedSessionId, { timeout: 20_000 })
+    .toBeTruthy();
+}
