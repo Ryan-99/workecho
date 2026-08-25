@@ -346,6 +346,24 @@ export async function costrictStop(binPath: string, spawnImpl: SpawnImpl = defau
   await runUntilExit(child, () => {});
 }
 
+/**
+ * 重新签发本地一次性 API Key（仅显示一次）。
+ * 场景：凭据/key 存在 router 的全局配置（AppData/Roaming/costrict-router），
+ * 已有登录态时 start 不再输出 key——必须 key reset 签发新 key，restart 后生效。
+ */
+export async function costrictKeyReset(binPath: string, spawnImpl: SpawnImpl = defaultSpawn): Promise<{ apiKey: string | null; output: string }> {
+  let output = "";
+  const child = spawnImpl(binPath, ["key", "reset"]);
+  await runUntilExit(child, (chunk) => { output += chunk; });
+  return { apiKey: extractApiKey(output), output };
+}
+
+/** 重启守护进程（key reset 后需 restart 新 key 才生效） */
+export async function costrictRestart(binPath: string, spawnImpl: SpawnImpl = defaultSpawn): Promise<void> {
+  const child = spawnImpl(binPath, ["restart"]);
+  await runUntilExit(child, () => {});
+}
+
 /* ============ 状态与健康检查 ============ */
 
 export interface CostrictStatus {

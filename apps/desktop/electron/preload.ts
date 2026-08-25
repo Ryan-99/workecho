@@ -314,7 +314,8 @@ contextBridge.exposeInMainWorld("piApp", {
   // 首次启动引导
   onboardingPickWorkspace: () => ipcRenderer.invoke("onboarding:pick-workspace") as Promise<string | null>,
   onboardingConfirmWorkspace: (p: string) => ipcRenderer.invoke("onboarding:confirm-workspace", p) as Promise<string>,
-  onboardingScan: () => ipcRenderer.invoke("onboarding:scan") as Promise<{ total: number; ok: number; categories: Record<string, number> }>,
+  onboardingScan: () => ipcRenderer.invoke("onboarding:scan") as Promise<{ total: number; byExt: Record<string, number> }>,
+  onboardingImport: () => ipcRenderer.invoke("onboarding:import") as Promise<{ total: number; ok: number; categories: Record<string, number>; skipped?: { dup: number; ignore: number; empty: number } }>,
   onboardingFinish: () => ipcRenderer.invoke("onboarding:finish") as Promise<boolean>,
   // 默认工作目录路径（给引导页显示）
   getDefaultWorkspacePath: () => ipcRenderer.invoke("workbench:get-default-path") as Promise<string>,

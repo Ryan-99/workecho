@@ -423,7 +423,13 @@ export interface PiDesktopApi {
   /** ---- Workecho 工作台扩展（onboarding / 业务 / wiki / 插件 / 技能 / MCP / 窗口） ---- */
   onboardingPickWorkspace(): Promise<string | null>;
   onboardingConfirmWorkspace(p: string): Promise<string>;
-  onboardingScan(): Promise<{ total: number; ok: number; categories: Record<string, number> }>;
+  onboardingScan(): Promise<{ total: number; byExt: Record<string, number> }>;
+  onboardingImport(): Promise<{
+    total: number;
+    ok: number;
+    categories: Record<string, number>;
+    skipped?: { dup: number; ignore: number; empty: number };
+  }>;
   onboardingFinish(): Promise<boolean>;
   getDefaultWorkspacePath(): Promise<string>;
   needsOnboarding(): Promise<boolean>;

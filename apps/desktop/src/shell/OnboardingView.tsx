@@ -1,26 +1,62 @@
 import { useState } from "react";
-import { FolderOpen, ScanSearch, SkipForward, Loader, Check, Folder } from "lucide-react";
+import { FolderOpen, ScanSearch, SkipForward, Loader, Check, Cloud, ArrowRight } from "lucide-react";
 import workechoMarkUrl from "../assets/workecho-mark.svg?url";
 
 interface Props {
   defaultPath: string;
   onPickWorkspace: () => Promise<string | null>;
   onConfirmWorkspace: (path: string) => Promise<void>;
-  onScan: () => Promise<{ total: number; ok: number; categories: Record<string, number> }>;
-  onFinish: () => void;
+  onScan: () => Promise<{ total: number; byExt: Record<string, number> }>;
+  onImport: () => Promise<{
+    total: number;
+    ok: number;
+    categories: Record<string, number>;
+    skipped?: { dup: number; ignore: number; empty: number };
+  }>;
+  onFinish: () => Promise<void>;
+  /** 打开模型服务配置引导（复用 ProviderSetupDialog） */
+  onConfigureProvider: () => void;
+  /** 是否已有可用模型服务（决定第三步的完成话术） */
+  providerReady: boolean;
 }
 
+const EXT_LABELS: Record<string, string> = {
+  ".docx": "Word",
+  ".pptx": "PPT",
+  ".xlsx": "Excel",
+  ".md": "Markdown",
+  ".txt": "文本",
+};
+
 /**
- * 首次启动引导：两步
+ * 首次启动引导：三步
  * 1. 选择/确认工作目录（强制）
- * 2. 选择是否扫描全 PC 文档（可选）
+ * 2. 扫描文档（两步制：先统计不读正文，确认后才导入）
+ * 3. 配置模型服务（可跳过，首次发消息时会再次引导）
  */
-export function OnboardingView({ defaultPath, onPickWorkspace, onConfirmWorkspace, onScan, onFinish }: Props) {
-  const [step, setStep] = useState<1 | 2>(1);
+export function OnboardingView({
+  defaultPath,
+  onPickWorkspace,
+  onConfirmWorkspace,
+  onScan,
+  onImport,
+  onFinish,
+  onConfigureProvider,
+  providerReady,
+}: Props) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [workspacePath, setWorkspacePath] = useState(defaultPath);
   const [confirming, setConfirming] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<{ total: number; ok: number; categories: Record<string, number> } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [scanStats, setScanStats] = useState<{ total: number; byExt: Record<string, number> } | null>(null);
+  const [importResult, setImportResult] = useState<{
+    total: number;
+    ok: number;
+    categories: Record<string, number>;
+    skipped?: { dup: number; ignore: number; empty: number };
+  } | null>(null);
   const [error, setError] = useState<string | undefined>();
 
   const handlePick = async () => {
@@ -46,8 +82,7 @@ export function OnboardingView({ defaultPath, onPickWorkspace, onConfirmWorkspac
     setScanning(true);
     setError(undefined);
     try {
-      const result = await onScan();
-      setScanResult(result);
+      setScanStats(await onScan());
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -55,8 +90,28 @@ export function OnboardingView({ defaultPath, onPickWorkspace, onConfirmWorkspac
     }
   };
 
-  const handleSkipOrFinish = () => {
-    onFinish();
+  const handleImport = async () => {
+    setImporting(true);
+    setError(undefined);
+    try {
+      setImportResult(await onImport());
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleFinish = async () => {
+    setFinishing(true);
+    setError(undefined);
+    try {
+      await onFinish();
+    } catch (e) {
+      // 完成失败不再卡死：提示后允许重试/跳过
+      setError(`完成引导失败：${(e as Error).message}`);
+      setFinishing(false);
+    }
   };
 
   return (
@@ -68,7 +123,7 @@ export function OnboardingView({ defaultPath, onPickWorkspace, onConfirmWorkspac
         {step === 1 && (
           <div className="onboarding-step">
             <p className="onboarding-desc">
-              选择一个目录作为你的工作区。业务数据（OKR、维保、待办、知识库）会存在这里。
+              选择一个目录作为你的工作区，知识库会存在这里。
             </p>
             <div className="onboarding-path-box" onClick={handlePick}>
               <FolderOpen size={16} />
@@ -85,24 +140,52 @@ export function OnboardingView({ defaultPath, onPickWorkspace, onConfirmWorkspac
         {step === 2 && (
           <div className="onboarding-step">
             <p className="onboarding-desc">
-              工作目录已就绪。要不要扫描你电脑上的文档（桌面/文档 + 其他目录），
-              自动分类导入知识库？
+              要不要扫描你电脑上的文档（桌面/文档目录），导入知识库？
             </p>
             <p className="onboarding-hint">
-              扫描只处理 .md/.txt 文件，不会修改或移动原文件。也可以跳过，以后把文件发给 agent 处理。
+              扫描 Word、PPT、Excel、Markdown 和文本文件。扫描阶段只统计文件名和格式，
+              <strong>不读取文件内容</strong>；你在下一步确认导入后才会读取正文并自动分类，
+              原文件不会被修改或移动。也可以跳过，以后把文件直接发给助手处理。
             </p>
 
             {scanning && (
               <div className="onboarding-scanning">
-                <Loader size={16} className="spin" /> 正在扫描并导入文档...
+                <Loader size={16} className="spin" /> 正在统计文档...
               </div>
             )}
 
-            {scanResult && (
+            {scanStats && !importing && !importResult && (
               <div className="onboarding-scan-result">
-                <Check size={14} /> 导入完成：{scanResult.ok} 篇文档
+                <ScanSearch size={14} /> 找到 {scanStats.total} 个文档
                 <div className="cat-detail">
-                  {Object.entries(scanResult.categories).map(([k, v]) => (
+                  {Object.entries(scanStats.byExt).map(([ext, n]) => (
+                    <span key={ext} className="cat-tag">{EXT_LABELS[ext] ?? ext}: {n}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {importing && (
+              <div className="onboarding-scanning">
+                <Loader size={16} className="spin" /> 正在读取并导入文档...
+              </div>
+            )}
+
+            {importResult && (
+              <div className="onboarding-scan-result">
+                <Check size={14} /> 已导入 {importResult.ok} 篇文档
+                {importResult.skipped && importResult.total - importResult.ok > 0 && (
+                  <div className="cat-detail">
+                    <span className="cat-tag">
+                      跳过 {importResult.total - importResult.ok} 个
+                      {importResult.skipped.dup > 0 && `（重复 ${importResult.skipped.dup}）`}
+                      {importResult.skipped.empty > 0 && `（内容过短 ${importResult.skipped.empty}）`}
+                      {importResult.skipped.ignore > 0 && `（不需要导入 ${importResult.skipped.ignore}）`}
+                    </span>
+                  </div>
+                )}
+                <div className="cat-detail">
+                  {Object.entries(importResult.categories).map(([k, v]) => (
                     <span key={k} className="cat-tag">{k}: {v}</span>
                   ))}
                 </div>
@@ -111,21 +194,53 @@ export function OnboardingView({ defaultPath, onPickWorkspace, onConfirmWorkspac
 
             {error && <div className="onboarding-error">{error}</div>}
 
-            {!scanning && !scanResult && (
+            {!scanning && !scanStats && (
               <button className="onboarding-btn primary" onClick={handleScan}>
-                <ScanSearch size={14} /> 立即扫描
+                <ScanSearch size={14} /> 扫描我的文档
               </button>
             )}
-            {scanResult && (
-              <button className="onboarding-btn primary" onClick={handleSkipOrFinish}>
-                <Check size={14} /> 完成，开始使用
+            {scanStats && !importResult && !importing && scanStats.total > 0 && (
+              <button className="onboarding-btn primary" onClick={handleImport}>
+                <Check size={14} /> 导入这 {scanStats.total} 个文档
               </button>
             )}
-            {!scanning && !scanResult && (
-              <button className="onboarding-btn ghost" onClick={handleSkipOrFinish}>
-                <SkipForward size={14} /> 跳过，以后再说
+            {(importResult || (scanStats && scanStats.total === 0) || !scanning) && !importing && (
+              <button className="onboarding-btn ghost" onClick={() => setStep(3)}>
+                <ArrowRight size={14} /> {importResult ? "下一步" : "跳过，继续"}
               </button>
             )}
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="onboarding-step">
+            <p className="onboarding-desc">
+              最后一步：接入一个模型服务，配好就能开始对话。
+            </p>
+            <p className="onboarding-hint">
+              支持账号登录、API Key 或自定义 OpenAI 兼容端点。
+            </p>
+            {providerReady ? (
+              <>
+                <div className="onboarding-scan-result">
+                  <Check size={14} /> 模型服务已就绪
+                </div>
+                <button className="onboarding-btn primary" onClick={handleFinish} disabled={finishing}>
+                  {finishing ? <Loader size={14} className="spin" /> : <Check size={14} />} 完成，开始使用
+                </button>
+                <button className="onboarding-btn ghost" onClick={onConfigureProvider} disabled={finishing}>
+                  <Cloud size={14} /> 再添加一个
+                </button>
+              </>
+            ) : (
+              <button className="onboarding-btn primary" onClick={onConfigureProvider} disabled={finishing}>
+                <Cloud size={14} /> 配置模型服务
+              </button>
+            )}
+            {!providerReady && (
+              <p className="onboarding-hint">配置完成后即可开始使用。</p>
+            )}
+            {error && <div className="onboarding-error">{error}</div>}
           </div>
         )}
       </div>

@@ -17,7 +17,7 @@ import { isValidHttpBaseUrl } from "@pi-gui/pi-sdk-driver";
 import { createHash, randomUUID } from "node:crypto";
 import type { AgentToolResult, ExtensionContext } from "./pi-compat";
 import { readFile, stat } from "node:fs/promises";
-import { existsSync, writeFileSync, readFileSync, readdirSync, unlinkSync, appendFileSync, statSync } from "node:fs";
+import { existsSync, writeFileSync, readFileSync, readdirSync, unlinkSync, appendFileSync, statSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { augmentPosixPath } from "../scripts/augment-path.cjs";
@@ -31,7 +31,7 @@ import { createBusinessRuntimeExtension } from "./business-runtime";
 import { createBusinessTools } from "./business-runtime";
 import {
   PROVIDER_ID as COSTRICT_PROVIDER_ID, LOCAL_BASE_URL as COSTRICT_LOCAL_URL, DEFAULT_BASE_URL as COSTRICT_DEFAULT_URL,
-  costrictLogin, costrictStart, costrictStop, costrictStatus, downloadBinary, installBundledBinary, fetchCostrictModels, readState as costrictReadState, writeState as costrictWriteState, setSecretCodec as setCostrictSecretCodec, managedBinaryPath,
+  costrictLogin, costrictStart, costrictKeyReset, costrictRestart, costrictStop, costrictStatus, downloadBinary, installBundledBinary, fetchCostrictModels, readState as costrictReadState, writeState as costrictWriteState, setSecretCodec as setCostrictSecretCodec, managedBinaryPath, waitHealthy as waitCostrictHealthy,
 } from "./costrict-service";
 import type { CustomProviderInput } from "@pi-gui/pi-sdk-driver";
 import { createPolicyExtension, setHookNotifier, setDangerousOpConfirmer } from "./tool-pipeline";
@@ -1515,8 +1515,15 @@ app.whenReady().then(async () => {
     } catch {
       stat = null;
     }
-    if (!stat || !stat.isDirectory()) {
-      throw new Error(`工作目录不存在或不是目录: ${workspacePath}`);
+    // S-04 校验口径：①路径已存在但不是目录（防把 AGENTS.md 写到任意文件旁）→ 拒绝；
+    // ②路径不存在但父目录存在 → 允许（首启默认 Workbench 正是这种形态，
+    // 由下方 initWorkspaceDir 创建；此前要求"必须已存在"把正常首启挡死了）；
+    // ③连父目录都不存在 → 拒绝（野路径）
+    if (stat && !stat.isDirectory()) {
+      throw new Error(`工作目录已存在但不是目录: ${workspacePath}`);
+    }
+    if (!stat && !existsSync(path.dirname(workspacePath))) {
+      throw new Error(`工作目录的父路径不存在: ${workspacePath}`);
     }
     initWorkspaceDir(workspacePath);  // 确保 workbench 子目录存在（幂等）
     const prompt = readBusinessPrompt(configuredUserDataDir);
@@ -1534,7 +1541,20 @@ app.whenReady().then(async () => {
     return workspacePath;
   });
   // 首次启动引导：执行全 PC 扫描
-  ipcMain.handle("onboarding:scan", async () => {
+  // 引导页扫描两步制（C-04 语义对齐）：scan 只按扩展名统计（不读文件正文），
+  // 用户在引导页确认"导入"后才由 onboarding:import 读取内容入库
+  ipcMain.handle("onboarding:scan", () => {
+    const dirs = getCommonDocDirs();
+    const allFiles: string[] = [];
+    for (const d of dirs) { allFiles.push(...scanDocs(d, 5)); }
+    const byExt: Record<string, number> = {};
+    for (const f of allFiles) {
+      const ext = path.extname(f).toLowerCase() || "(无扩展名)";
+      byExt[ext] = (byExt[ext] ?? 0) + 1;
+    }
+    return { total: allFiles.length, byExt };
+  });
+  ipcMain.handle("onboarding:import", async () => {
     // 扫描导入目标：当前选中的工作区（而不是写死的默认 Workbench——
     // 用户切换工作区后扫进默认库，会导致"导入完成但界面看不到"）
     const wsPath = store.state.workspaces.find((w) => w.id === store.state.selectedWorkspaceId)?.path ?? defaultWorkspacePath;
@@ -1678,9 +1698,25 @@ app.whenReady().then(async () => {
       // 4. 启动本地代理 + 捕获一次性 key
       await opts.callbacks?.onProgress?.("启动本地代理服务...");
       const started = await costrictStart({ dir: costrictDir, binPath });
-      const apiKey = started.apiKey ?? costrictReadState(costrictDir).apiKey;
-      if (!apiKey) return { ok: false, error: "服务已启动，但未能捕获本地 API Key（仅显示一次），请重试" };
-      if (!started.healthy) return { ok: false, error: "本地代理服务未就绪，请稍后重试" };
+      let apiKey = started.apiKey ?? costrictReadState(costrictDir).apiKey;
+      let keyReissued = false;
+      if (!apiKey) {
+        // 凭据/key 存于 router 全局配置（跨 userData 共享）：已有登录态时 start
+        // 不再输出一次性 key。key reset 重新签发（仅显示一次），restart 后生效。
+        await opts.callbacks?.onProgress?.("重新签发本地凭据...");
+        const reset = await costrictKeyReset(binPath);
+        if (!reset.apiKey) return { ok: false, error: `key reset 未返回新 Key: ${reset.output.slice(-160)}` };
+        apiKey = reset.apiKey;
+        keyReissued = true;
+      }
+      if (!apiKey) return { ok: false, error: "服务已启动，但未能获取本地 API Key，请重试" };
+      costrictWriteState(costrictDir, { apiKey });
+      let healthy = started.healthy;
+      if (keyReissued) {
+        await costrictRestart(binPath);
+        healthy = await waitCostrictHealthy({ timeoutMs: 15000 });
+      }
+      if (!healthy) return { ok: false, error: "本地代理服务未就绪，请稍后重试" };
 
       // 5. 注册 provider + 热刷新
       await opts.callbacks?.onProgress?.("注册 CoStrict 模型...");
@@ -2010,6 +2046,9 @@ app.whenReady().then(async () => {
 
   // 引导完成：标记 sentinel（不再自动扫描）+ 通知渲染层刷新业务数据
   ipcMain.handle("onboarding:finish", () => {
+    // 兜底：confirm-workspace 未执行/被跳过时目录可能不存在，直接写 sentinel 会 ENOENT
+    // 并让渲染层 await 挂死（曾致引导页"完成开始使用"卡死）
+    mkdirSync(defaultWorkspacePath, { recursive: true });
     const sentinel = path.join(defaultWorkspacePath, ".init-scan-done");
     writeFileSync(sentinel, new Date().toISOString(), "utf-8");
     // 通知渲染层：业务数据已就绪，立即刷新状态面板

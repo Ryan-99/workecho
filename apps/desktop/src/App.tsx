@@ -183,8 +183,45 @@ export default function App() {
     });
   }, []);
 
+  // 默认模型兜底：任何路径（引导/设置页/导入配置）配好 provider 后，若会话没有
+  // 默认模型但已存在可用模型，自动选第一个——避免"已登录却要求先选模型"的断档
+  const activeRuntime = state?.runtimeByWorkspace?.[state.selectedWorkspaceId ?? ""];
+  useEffect(() => {
+    if (!state?.selectedWorkspaceId || !activeRuntime?.settings) return;
+    if (activeRuntime.settings.defaultModelId) return;
+    const first = activeRuntime.models?.find((m) => m.available);
+    if (!first) return;
+    window.piApp
+      .setDefaultModel(state.selectedWorkspaceId, first.providerId, first.modelId)
+      .then((s) => applyState(s))
+      .catch(() => {});
+  }, [activeRuntime, state?.selectedWorkspaceId, applyState]);
+
   // 模型服务配置引导：首次发消息 pi 要 API key 时主进程拦截推送 → 弹完整 provider 列表
   const [providerSetup, setProviderSetup] = useState<{ reason?: string } | null>(null);
+
+  // 引导第三步用：是否已有可用的模型服务。三类来源都要覆盖——
+  // 内置 provider（runtime.providers.hasAuth）、CoStrict（apiKeySaved，注册为
+  // pi 自定义 provider 不进内置列表）、自定义 OpenAI 兼容端点（带 apiKey）
+  const [providerReady, setProviderReady] = useState(false);
+  const runtimeProviders = state?.runtimeByWorkspace?.[state.selectedWorkspaceId ?? ""]?.providers;
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const builtin = runtimeProviders?.some((p) => p.hasAuth) ?? false;
+      let costrictOk = false;
+      let customOk = false;
+      try {
+        const api = window as unknown as { piApp?: { costrictStatus?: () => Promise<{ apiKeySaved?: boolean }> } };
+        costrictOk = Boolean((await api.piApp?.costrictStatus?.())?.apiKeySaved);
+      } catch { /* 不可达时按未配置处理 */ }
+      try {
+        customOk = (await window.piApp.listCustomProviders()).some((c) => Boolean(c.apiKey));
+      } catch { /* 忽略 */ }
+      if (alive) setProviderReady(builtin || costrictOk || customOk);
+    })();
+    return () => { alive = false; };
+  }, [runtimeProviders, providerSetup]);
   useEffect(() => {
     const api = (window as any).piApp;
     if (!api?.onProviderSetupNeeded) return;
@@ -320,16 +357,34 @@ export default function App() {
   // 首次启动引导（优先于一切）
   if (onboarding) {
     return (
+      <>
+      {/* 引导分支也必须挂 DialogHost：登录/确认类 app-dialog（如 provider 登录过程
+          的 prompt）走全局 DialogHost 渲染，缺了它 await 会永远挂住（曾致登录卡死） */}
+      <DialogHost />
       <OnboardingView
         defaultPath={defaultPath}
         onPickWorkspace={async () => window.piApp.onboardingPickWorkspace()}
         onConfirmWorkspace={async (p) => { await window.piApp.onboardingConfirmWorkspace(p); }}
         onScan={async () => window.piApp.onboardingScan()}
+        onImport={async () => window.piApp.onboardingImport()}
+        onConfigureProvider={() => setProviderSetup({ reason: "配置模型服务后即可开始对话" })}
+        providerReady={providerReady}
         onFinish={async () => {
           await window.piApp.onboardingFinish();
           setOnboarding(false);
         }}
       />
+      {/* 引导期间主界面未渲染，配置弹窗必须挂在引导分支里（否则点击无反应） */}
+      {providerSetup && (
+        <ProviderSetupDialog
+          state={state}
+          reason={providerSetup.reason}
+          hideSettingsLink
+          onClose={() => setProviderSetup(null)}
+          onOpenSettings={() => setProviderSetup(null)}
+        />
+      )}
+      </>
     );
   }
 

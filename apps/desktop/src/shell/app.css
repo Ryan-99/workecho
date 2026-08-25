@@ -5470,3 +5470,40 @@ pre.tool-compact {
   font-size: inherit;
   padding: 0;
 }
+/* 自定义 provider 行内表单（配置引导弹窗） */
+.provider-setup-sub {
+  font-size: 10px;
+  color: var(--text-tertiary, #8a8782);
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  white-space: nowrap;
+}
+.provider-setup-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px dashed var(--border-light, #cfccc6);
+  background: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-secondary, #6e6b66);
+  cursor: pointer;
+}
+.provider-setup-add:hover { border-color: #b3b0aa; }
+.provider-setup-custom-form { padding-top: 6px; }
+.provider-setup-custom-form textarea {
+  width: 100%;
+  border: 1px solid var(--border-light, #e3e1dd);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+/* 系统级弹窗(DialogHost:登录 prompt/危险确认/通知)永远置于业务浮层之上——
+   否则会被后渲染的 ProviderSetupDialog 等盖住,用户看不到无法操作 */
+.app-dialog-overlay--system { z-index: 3000; }

@@ -109,7 +109,7 @@ export function DialogHost() {
   const cancelLabel = spec.cancelText ?? (isAlert ? "" : "取消");
 
   return (
-    <div className="app-dialog-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) finish(false); }}>
+    <div className="app-dialog-overlay app-dialog-overlay--system" onMouseDown={(e) => { if (e.target === e.currentTarget) finish(false); }}>
       <div
         className="app-dialog"
         onKeyDown={(e) => {
