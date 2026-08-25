@@ -2532,6 +2532,22 @@ app.whenReady().then(async () => {
     }
     const ws = store.workspaceRefFromState(store.state.selectedWorkspaceId);
     if (!ws) return { created: false, reason: "无可用工作区" };
+    // R-07：主进程二次防线。此前渲染层被 XSS 后即可借本通道静默写入并热加载
+    // 可执行插件代码（selfModifyPlugins 是全局配置，不代表"此刻用户知情"）。
+    // 与 Agent 工具路径（wiki_create_plugin 的 dangerousConfirmer）对齐：写盘前
+    // 必须过应用内确认，用户拒绝即中止。
+    if (typeof name !== "string" || typeof code !== "string" || !name.trim() || !code.trim()) {
+      return { created: false, reason: "插件名或代码为空" };
+    }
+    const confirmed = await showAppDialog(mainWindow, {
+      kind: "confirm",
+      message: "创建插件（可执行代码）",
+      detail: `即将在工作区写入并热加载插件代码：\n${name.replace(/[^a-zA-Z0-9-_]/g, "-")}.ts（${code.length} 字符）\n\n请确认这是你本人的操作。`,
+      danger: true,
+    });
+    if (confirmed?.ok !== true) {
+      return { created: false, reason: "用户取消了插件创建" };
+    }
     const result = createPlugin(ws.path, name, code);
     // P1-a 热加载：创建成功后刷新运行时
     if ((result as any).created) {

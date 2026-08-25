@@ -29,8 +29,16 @@ const GITHUB_REPO = "mokeyjay/costrict-router";
  * 查询：下载资产后 sha256sum，或 GitHub Release 页官方 checksums。
  */
 const PINNED_SHA256: Record<string, string> = {
-  // 下载资产 pin：新版本发布后在此追加即可强制校验；
-  // 未列出的版本走 TOFU（首次记录、防事后替换）。
+  // 下载资产 pin（key = `${tag_name}/${assetName}`，与 installBinaryDownload 的
+  // digestKey 一致）。v0.3.2 全平台资产哈希为 2026-08-25 从官方 Release 实测下载
+  // 计算——下载即执行的供应链校验不再依赖纯 TOFU。上游发新版后：要么更新此表，
+  // 要么删掉旧条目让其对新版本走 TOFU。
+  "v0.3.2/costrict-router_v0.3.2_linux_amd64.tar.gz": "afbc426b13ea4a6ee5966031e286ad21a32ce2e74caa87cfd8f41752b21c036b",
+  "v0.3.2/costrict-router_v0.3.2_linux_arm64.tar.gz": "eaaac4681f9a66480581eb700aba866ff13b580df22dff2c7766d7d3d957e21c",
+  "v0.3.2/costrict-router_v0.3.2_macos_amd64.tar.gz": "95c97cd359834d129bb7199d790cd62d1e057cbdbb596469bcf7ce9c39b47456",
+  "v0.3.2/costrict-router_v0.3.2_macos_arm64.tar.gz": "e0beafaab12006c707248998eea8e54ce03df211792c108fa0eb492ac9911c47",
+  "v0.3.2/costrict-router_v0.3.2_windows_amd64.zip": "a59a4c57afc785508faef77d03fd4816197a9794d94da2785c03419190abf55f",
+  "v0.3.2/costrict-router_v0.3.2_windows_arm64.zip": "b1d37bc79e8fd8c25cf937dd2082f4f908e70f4f5f455fabee3a6011c4f6ea47",
 };
 
 /**
