@@ -161,3 +161,41 @@ test("compact-session confirm gate and context meter popover work on the shell c
     await harness.close();
   }
 });
+
+test("provider setup dialog lists configurable providers instead of a bare API key input", async () => {
+  test.setTimeout(120_000);
+  const userDataDir = await makeUserDataDir("shell-provider-setup-");
+  const workspacePath = await makeWorkspace("shell-provider-setup-workspace");
+  const harness = await launchDesktop(userDataDir, {
+    initialWorkspaces: [workspacePath],
+    testMode: "background",
+  });
+
+  try {
+    const window = await harness.firstWindow();
+    await waitForWorkspaceByPath(window, workspacePath);
+
+    // 模拟"发消息触发 pi 要 API key"（e2e 测试钩子 → 主进程拦截推送同款通道）
+    await harness.electronApp.evaluate((electron) => {
+      const hooks = (globalThis as { __PI_APP_TEST_HOOKS?: { emitProviderSetupNeeded?: (m?: string) => void } })
+        .__PI_APP_TEST_HOOKS;
+      if (!hooks?.emitProviderSetupNeeded) throw new Error("emitProviderSetupNeeded hook unavailable");
+      hooks.emitProviderSetupNeeded("Enter your API key");
+    });
+
+    // 弹出的是完整 provider 配置引导，而不是裸 key 输入框
+    const dialog = window.locator(".provider-setup-dialog");
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await expect(dialog).toContainText("配置模型服务");
+    // CoStrict 一键接入出现在"直接登录"分组（内网用户正路）
+    await expect(dialog.locator(".provider-setup-group-title", { hasText: "直接登录" })).toBeVisible();
+    await expect(dialog).toContainText("CoStrict");
+    // 不再出现旧的 key 输入 prompt 形态（app-dialog__input）
+    await expect(dialog.locator(".app-dialog__input")).toHaveCount(0);
+    // 关闭按钮可退出
+    await dialog.locator(".app-dialog__close").click();
+    await expect(dialog).toHaveCount(0);
+  } finally {
+    await harness.close();
+  }
+});

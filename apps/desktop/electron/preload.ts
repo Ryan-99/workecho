@@ -377,6 +377,12 @@ contextBridge.exposeInMainWorld("piApp", {
   // Wiki 统计/图谱/搜索（Phase 5）
   // CoStrict 一键接入（托管 costrict-router，登录/断开走 loginProvider/logoutProvider）
   costrictStatus: () => ipcRenderer.invoke("workbench:costrict-status"),
+  // 模型服务配置引导（首次发消息时 pi 要 API key → 主进程拦截转完整 provider 列表弹窗）
+  onProviderSetupNeeded: (listener: (p: { message: string }) => void) => {
+    const handler = (_e: unknown, payload: any) => listener(payload);
+    ipcRenderer.on("workbench:provider-setup-needed", handler);
+    return () => ipcRenderer.removeListener("workbench:provider-setup-needed", handler);
+  },
   // 应用内弹窗（主进程发起 → 渲染层展示 → 结果回传）
   onAppDialog: (listener: (spec: any) => void) => {
     const handler = (_e: unknown, payload: any) => listener(payload);

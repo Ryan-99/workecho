@@ -12,6 +12,7 @@ import { SettingsView, SETTINGS_TABS, type SettingsTab } from "./shell/SettingsV
 import { WelcomeView } from "./shell/WelcomeView";
 import { DialogHost } from "./shell/app-dialog";
 import { OnboardingView } from "./shell/OnboardingView";
+import { ProviderSetupDialog } from "./shell/ProviderSetupDialog";
 import { ArchiveView } from "./shell/ArchiveView";
 import { ScheduleManagerView } from "./shell/ScheduleManagerView";
 import { WikiView } from "./shell/WikiView";
@@ -182,6 +183,17 @@ export default function App() {
     });
   }, []);
 
+  // 模型服务配置引导：首次发消息 pi 要 API key 时主进程拦截推送 → 弹完整 provider 列表
+  const [providerSetup, setProviderSetup] = useState<{ reason?: string } | null>(null);
+  useEffect(() => {
+    const api = (window as any).piApp;
+    if (!api?.onProviderSetupNeeded) return;
+    const off = api.onProviderSetupNeeded((p: { message: string }) => {
+      setProviderSetup({ reason: "发送消息需要先接入一个模型服务" });
+    });
+    return off;
+  }, []);
+
   // 长工具进度（init_workspace 等）：顶部细进度条
   const [toolProgress, setToolProgress] = useState<{ tool: string; phase: string; current: number; total: number; message?: string } | null>(null);
   useEffect(() => {
@@ -330,6 +342,14 @@ export default function App() {
   return (
     <div className="app-shell">
       <DialogHost />
+      {providerSetup && (
+        <ProviderSetupDialog
+          state={state}
+          reason={providerSetup.reason}
+          onClose={() => setProviderSetup(null)}
+          onOpenSettings={() => { setActiveView("settings"); setSettingsTab("providers"); }}
+        />
+      )}
       {/* 统一标题栏：横跨三栏，深色背景，只有窗口控制 */}
       <div className="app-titlebar">
         <span className="app-titlebar__brand"><img src={workechoMarkUrl} alt="Workecho" className="app-titlebar__logo" /> Workecho</span>

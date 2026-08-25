@@ -431,6 +431,8 @@ export interface PiDesktopApi {
   appDialogResult(id: number, result: { ok: boolean; value?: string }): Promise<void>;
   onAppDialog(listener: (spec: unknown) => void): () => void;
   onCostrictEvent(listener: (e: { step: string; message: string }) => void): () => void;
+  /** 首次发消息时 pi 要 API key 被拦截 → 渲染层弹出完整 provider 配置引导 */
+  onProviderSetupNeeded(listener: (p: { message: string }) => void): () => void;
   onToolProgress(
     listener: (p: { tool: string; phase: string; current: number; total: number; message?: string }) => void,
   ): () => void;

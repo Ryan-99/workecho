@@ -5389,3 +5389,84 @@ pre.tool-compact {
 }
 .tool-progress-bar.done { padding: 4px 16px; }
 .tool-progress-bar.done .tool-progress-label { color: var(--success); }
+
+/* ============ 模型服务配置引导弹窗（首次发消息时） ============ */
+.provider-setup-dialog {
+  max-width: 460px;
+  width: min(460px, calc(100vw - 48px));
+  max-height: min(72vh, 640px);
+  overflow-y: auto;
+  text-align: left;
+}
+.provider-setup-group { margin-top: 12px; }
+.provider-setup-group-title {
+  font-size: 11px;
+  color: var(--text-tertiary, #8a8782);
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+}
+.provider-setup-row {
+  border: 1px solid var(--border-light, #e3e1dd);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: var(--bg-surface, #faf9f7);
+}
+.provider-setup-row.is-connected { border-color: #b9c6b0; }
+.provider-setup-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.provider-setup-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.provider-setup-badge {
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #e7ebe3;
+  color: #5d6f56;
+}
+.provider-setup-key {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.provider-setup-key input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-light, #e3e1dd);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.provider-setup-error {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--danger, #c0392b);
+  word-break: break-all;
+}
+.provider-setup-footer {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--text-tertiary, #8a8782);
+}
+.provider-setup-footer .link-btn {
+  border: none;
+  background: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+}

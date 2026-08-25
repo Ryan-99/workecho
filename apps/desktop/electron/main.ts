@@ -1382,6 +1382,10 @@ app.whenReady().then(async () => {
         },
         promptForText: (message: string, placeholder?: string, allowEmpty?: boolean) =>
           promptForText(mainWindow, message, placeholder ?? "", allowEmpty ?? false),
+        emitProviderSetupNeeded: (message = "Enter your API key") => {
+          // e2e 用：模拟"发消息触发 pi 要 key"的拦截推送
+          mainWindow?.webContents.send("workbench:provider-setup-needed", { message });
+        },
         runOrchestrationRuntimeTool: (input: OrchestrationRuntimeToolTestInput) =>
           runOrchestrationRuntimeToolForTest(orchestrationRuntimeBridge, input),
         setDeferredThreadTitleMode: () => {
@@ -2944,8 +2948,18 @@ function createRuntimeLoginCallbacks(window?: BrowserWindow | null) {
         await showLoginInstructions(window, instructions.trim());
       }
     },
-    onPrompt: async ({ message, placeholder, allowEmpty }: { readonly message: string; readonly placeholder?: string; readonly allowEmpty?: boolean }) =>
-      promptForText(window, message, placeholder, allowEmpty ?? false),
+    onPrompt: async ({ message, placeholder, allowEmpty }: { readonly message: string; readonly placeholder?: string; readonly allowEmpty?: boolean }) => {
+      // API Key 型认证 prompt 不再弹裸输入框（上游英文文案"Enter your API key"）：
+      // 通知渲染层打开模型服务配置引导（完整 provider 列表，含 CoStrict 一键登录）。
+      // 当前 pi 登录流以错误终止，用户配置完成后重新发送消息即可。
+      if (/api[_ ]?key/i.test(message)) {
+        try {
+          window?.webContents.send("workbench:provider-setup-needed", { message });
+        } catch { /* 窗口可能已关闭 */ }
+        throw new Error("已打开模型服务配置，配好后请重新发送消息");
+      }
+      return promptForText(window, message, placeholder, allowEmpty ?? false);
+    },
   };
 }
 
