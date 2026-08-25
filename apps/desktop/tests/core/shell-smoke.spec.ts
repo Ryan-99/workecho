@@ -187,8 +187,9 @@ test("provider setup dialog lists configurable providers instead of a bare API k
     const dialog = window.locator(".provider-setup-dialog");
     await expect(dialog).toBeVisible({ timeout: 10_000 });
     await expect(dialog).toContainText("配置模型服务");
-    // CoStrict 一键接入出现在"直接登录"分组（内网用户正路）
-    await expect(dialog.locator(".provider-setup-group-title", { hasText: "直接登录" })).toBeVisible();
+    // CoStrict 一键接入出现在"账号登录"分组（内网用户正路；引导页三步重做后
+    // 分组从"直接登录"改为"账号登录/API Key/自定义"三段）
+    await expect(dialog.locator(".provider-setup-group-title", { hasText: "账号登录" })).toBeVisible();
     await expect(dialog).toContainText("CoStrict");
     // 不再出现旧的 key 输入 prompt 形态（app-dialog__input）
     await expect(dialog.locator(".app-dialog__input")).toHaveCount(0);
