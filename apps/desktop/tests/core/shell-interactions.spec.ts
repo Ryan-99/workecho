@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import {
   getDesktopState,
   launchDesktop,
@@ -103,11 +104,35 @@ test("slash menu opens, filters, and inserts; @ opens the file reference menu", 
     await composer.fill("/zzz-no-match");
     await expect(menu).toHaveCount(0);
 
-    // 重新唤出并点选第一项 → 插入命令文本
+    // 重新唤出点选 /compact → 本地执行：弹压缩确认 → 取消（输入框清空、无消息发送）
     await composer.fill("/");
     await expect(menu).toBeVisible();
-    await menu.locator(".slash-menu__item").first().click();
-    await expect(composer).toHaveValue(/^\/\S+ $/);
+    await menu.locator(".slash-menu__item", { hasText: "/compact" }).click();
+    const compactDialog = window.locator(".app-dialog");
+    await expect(compactDialog).toBeVisible({ timeout: 10_000 });
+    await expect(compactDialog).toContainText("压缩会话上下文");
+    await compactDialog.locator(".app-dialog__btn", { hasText: "取消" }).first().click();
+    await expect(compactDialog).toHaveCount(0);
+    await expect(composer).toHaveValue("");
+
+    // /thinking 点选 → 参数选项 → 选 high → 本地设置思考级别（不发消息，输入框清空）
+    await composer.fill("/");
+    await expect(menu).toBeVisible();
+    await menu.locator(".slash-menu__item", { hasText: "/thinking" }).click();
+    const group = menu.locator(".slash-menu__group");
+    await expect(group).toBeVisible();
+    await expect(group).toContainText("思考级别");
+    await menu.locator(".slash-menu__item", { hasText: "high" }).first().click();
+    await expect(composer).toHaveValue("");
+
+    // 模糊 slash 输入（/thin）点发送按钮 → 先补全而不是发给模型
+    await composer.fill("/thin");
+    await composer.press("Enter"); // 菜单激活时 Enter 应被拦截为补全
+    await expect(composer).toHaveValue(/^\/thinking $/);
+    await composer.fill("");
+    await composer.fill("/thin");
+    await window.locator(".composer__send").click();
+    await expect(composer).toHaveValue(/^\/thinking $/);
 
     // @ 唤出文件引用菜单（makeWorkspace 自带 README.md，非 git 目录走兜底遍历）
     await composer.fill("");
@@ -115,6 +140,62 @@ test("slash menu opens, filters, and inserts; @ opens the file reference menu", 
     const atMenu = window.locator(".slash-menu.at-file-menu");
     await expect(atMenu).toBeVisible({ timeout: 15_000 });
     await expect(atMenu).toContainText("README.md");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("picking a skill from the slash menu loads it as a removable chip in the composer", async () => {
+  test.setTimeout(120_000);
+  const userDataDir = await makeUserDataDir("shell-skill-chip-");
+  const agentDir = join(userDataDir, "agent");
+  const workspacePath = await makeWorkspace("shell-skill-chip-workspace");
+  await seedAgentDir(agentDir);
+  // 种一个演示技能（pi 扫描 agentDir/skills 后注册为 /skill:demo-skill）
+  await mkdir(join(agentDir, "skills", "demo-skill"), { recursive: true });
+  await writeFile(
+    join(agentDir, "skills", "demo-skill", "SKILL.md"),
+    `---
+name: demo-skill
+description: 演示技能
+---
+
+# Demo
+测试用技能。
+`,
+    "utf8",
+  );
+  const harness = await launchDesktop(userDataDir, {
+    agentDir,
+    initialWorkspaces: [workspacePath],
+    testMode: "background",
+  });
+
+  try {
+    const window = await harness.firstWindow();
+    const workspace = await waitForWorkspaceByPath(window, workspacePath);
+    await createSessionIpc(window, workspace.id, "Skill chip thread");
+    const composer = window.locator(".chat-panel .composer textarea");
+    await expect(composer).toBeVisible({ timeout: 20_000 });
+
+    // 输入 / 唤出菜单，等技能命令被运行时注册后出现
+    await composer.click();
+    await composer.fill("/");
+    const skillItem = window.locator(".slash-menu__item", { hasText: "demo-skill" });
+    await expect(skillItem).toBeVisible({ timeout: 20_000 });
+
+    // 选中 → 输入框渲染胶囊（名称+可移除），输入框清空并聚焦
+    await skillItem.click();
+    const chip = window.locator(".composer-skill-chip");
+    await expect(chip).toBeVisible();
+    await expect(chip).toContainText("demo-skill");
+    await expect(composer).toHaveValue("");
+
+    // 补任务并发送 → 胶囊随消息发出并清除
+    await composer.fill("帮我做个演示");
+    await window.locator(".composer__send").click();
+    await expect(chip).toHaveCount(0);
+    await expect(composer).toHaveValue("");
   } finally {
     await harness.close();
   }

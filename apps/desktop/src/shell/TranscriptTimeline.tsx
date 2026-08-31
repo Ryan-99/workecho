@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { FileText, Plus, Sparkles } from "lucide-react";
+import { fileExtension, formatFileSize } from "../composer-paste";
+import { ImageLightbox } from "./ImageLightbox";
 import ReactMarkdown from "react-markdown";
 import type { SessionTranscriptMessage, SessionTranscriptToolCall } from "@pi-gui/pi-sdk-driver";
 import { REMARK_PLUGINS, REHYPE_PLUGINS, MARKDOWN_COMPONENTS } from "../message-markdown";
@@ -245,6 +247,31 @@ function renderSingleItem(item: unknown, index: number): ReactNode {
 /* 消息 / activity                                                     */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 用户消息中的技能调用展示：/skill:name 任务…… → 只渲染任务文本，
+ * 命令前缀转为小徽标（与 composer 技能胶囊呼应——命令语法不裸露在对话流里）
+ */
+function SkillCommandText({ text }: { text: string }) {
+  const m = text.match(/^\/(skill:[^\s]+)\s*([\s\S]*)$/);
+  if (!m) {
+    return <div className="bubble user-bubble">{text}</div>;
+  }
+  // 技能调用只显示任务文本——命令前缀与徽标均不进对话流（Ryan：徽标也不要）
+  const task = (m[2] ?? "").trim();
+  return <div className="bubble user-bubble">{task || "（仅调用技能）"}</div>;
+}
+
+/** 消息内图片：双击放大预览 */
+function MessageImage({ src, alt }: { src: string; alt: string }) {
+  const [zoom, setZoom] = useState(false);
+  return (
+    <>
+      <img className="msg-image" src={src} alt={alt} title="双击放大" onDoubleClick={() => setZoom(true)} />
+      {zoom && <ImageLightbox src={src} alt={alt} onClose={() => setZoom(false)} />}
+    </>
+  );
+}
+
 function MessageView({ msg }: { msg: SessionTranscriptMessage }) {
   if (msg.role === "user") {
     return (
@@ -253,14 +280,20 @@ function MessageView({ msg }: { msg: SessionTranscriptMessage }) {
           <div className="msg-attachments">
             {msg.attachments.map((a, i) =>
               a.kind === "image" ? (
-                <img key={a.name ?? i} className="msg-image" src={`data:${a.mimeType};base64,${a.data}`} alt={a.name ?? "图片"} />
+                <MessageImage key={a.name ?? i} src={`data:${a.mimeType};base64,${a.data}`} alt={a.name ?? "图片"} />
               ) : (
-                <span key={a.fsPath ?? i} className="msg-file-chip" title={a.fsPath}>📄 {a.name}</span>
+                <span key={a.fsPath ?? i} className="msg-att-file" title={a.fsPath}>
+                  <FileText size={14} />
+                  <span className="msg-att-file__name">{a.name}</span>
+                  <span className="msg-att-file__meta">
+                    {fileExtension(a.name)}{typeof a.sizeBytes === "number" ? ` · ${formatFileSize(a.sizeBytes)}` : ""}
+                  </span>
+                </span>
               ),
             )}
           </div>
         )}
-        <div className="bubble user-bubble">{msg.text}</div>
+        <SkillCommandText text={msg.text} />
         <MessageActions messageId={msg.id} />
       </div>
     );

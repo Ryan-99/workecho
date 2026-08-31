@@ -186,16 +186,40 @@ export default function App() {
   // 默认模型兜底：任何路径（引导/设置页/导入配置）配好 provider 后，若会话没有
   // 默认模型但已存在可用模型，自动选第一个——避免"已登录却要求先选模型"的断档
   const activeRuntime = state?.runtimeByWorkspace?.[state.selectedWorkspaceId ?? ""];
+  // 防重入：setDefaultModel 返回的新 state 若仍无 defaultModelId（scoped view 缺失等），
+  // 会在新 runtime 引用上无限重触发 → IPC 风暴冻结渲染（线上白屏根因）。同一目标只尝试一次。
+  const defaultModelAttemptRef = useRef<string | null>(null);
   useEffect(() => {
     if (!state?.selectedWorkspaceId || !activeRuntime?.settings) return;
-    if (activeRuntime.settings.defaultModelId) return;
+    if (activeRuntime.settings.defaultModelId) {
+      defaultModelAttemptRef.current = null;
+      return;
+    }
     const first = activeRuntime.models?.find((m) => m.available);
     if (!first) return;
+    const attemptKey = `${state.selectedWorkspaceId}:${first.providerId}/${first.modelId}`;
+    if (defaultModelAttemptRef.current === attemptKey) return;
+    defaultModelAttemptRef.current = attemptKey;
     window.piApp
       .setDefaultModel(state.selectedWorkspaceId, first.providerId, first.modelId)
       .then((s) => applyState(s))
       .catch(() => {});
   }, [activeRuntime, state?.selectedWorkspaceId, applyState]);
+
+  // 截图粘贴主路（微信/QQ 等截图工具）：主进程在 before-input-event 拦截 Ctrl+V、
+  // 用 clipboard.readImage() 直接读剪贴板位图（此类剪贴板渲染层 DataTransfer 常拿不到），
+  // preventDefault 后经 clipboardImagePasted 事件下发——此前 shell 无订阅者，
+  // 按键被吃、渲染层 paste 又不触发，表现为"粘贴完全无反应"
+  useEffect(() => {
+    const api = window.piApp as unknown as {
+      onClipboardImagePasted?: (l: (a: unknown) => void) => () => void;
+      addComposerAttachments?: (list: readonly unknown[]) => Promise<unknown>;
+    };
+    if (!api.onClipboardImagePasted || !api.addComposerAttachments) return;
+    return api.onClipboardImagePasted((attachment) => {
+      void api.addComposerAttachments?.([attachment]).catch(() => {});
+    });
+  }, []);
 
   // 模型服务配置引导：首次发消息 pi 要 API key 时主进程拦截推送 → 弹完整 provider 列表
   const [providerSetup, setProviderSetup] = useState<{ reason?: string } | null>(null);
@@ -322,8 +346,14 @@ export default function App() {
 
   // 停止生成
   const cancelRun = useCallback(async () => {
-    const s = await window.piApp.cancelCurrentRun();
-    applyState(s);
+    try {
+      const s = await window.piApp.cancelCurrentRun();
+      applyState(s);
+    } catch (e) {
+      // 取消失败必须可见（此前静默 unhandled rejection，表现为"点停止没反应"）
+      console.error("[App] 停止生成失败:", e);
+      appAlert(`停止失败: ${(e as Error).message}`);
+    }
   }, [applyState]);
 
   // 切换主题
@@ -492,7 +522,7 @@ export default function App() {
             ) : showSchedule ? (
               <ScheduleManagerView onClose={() => setShowSchedule(false)} />
             ) : view === "new-thread" || !hasSession ? (
-              <WelcomeView onSend={sendMessage} />
+              <WelcomeView onSend={sendMessage} state={state} />
             ) : (
           <ChatPanel
             state={state}

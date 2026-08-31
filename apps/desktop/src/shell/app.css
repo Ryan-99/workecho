@@ -1168,21 +1168,50 @@ body {
 .composer-attachment-remove:hover { color: var(--text); background: var(--bg-hover); }
 
 /* 消息内附件（用户发的图片/文件） */
+/* 消息内附件：每个附件独立卡片，规整网格排列 */
 .msg-attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 4px 0;
+  gap: 8px;
+  margin: 0 0 8px;
   justify-content: flex-end;
 }
 .msg-image {
-  max-width: 260px;
-  max-height: 200px;
-  border-radius: var(--radius-md, 8px);
+  width: 200px;
+  height: 200px;
+  object-fit: cover;
+  border-radius: 10px;
   border: 1px solid var(--border);
   display: block;
   cursor: zoom-in;
 }
+.msg-att-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 210px;
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-muted, #faf9f7);
+  color: var(--text-secondary);
+  font-size: 11px;
+  box-sizing: border-box;
+}
+.msg-att-file__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg-att-file__meta {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted, #8a8782);
+}
+.msg-attachments .msg-file-chip { display: none !important; }
 .msg-file-chip {
   display: inline-flex;
   align-items: center;
@@ -3164,7 +3193,7 @@ pre.tool-compact {
 }
 /* ============ 消息渲染（Codex 风格：assistant 无气泡） ============ */
 .msg { margin: 16px 0; }
-.msg.user { display: flex; justify-content: flex-end; margin-bottom: 20px; }
+.msg.user { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 20px; }
 .msg.assistant, .msg.assistant-msg, .msg.summary-msg { margin-top: 20px; }
 .user-bubble {
   max-width: 85%;
@@ -5036,9 +5065,16 @@ pre.tool-compact {
   font-weight: 500;
   min-width: 90px;
 }
+.slash-menu__item { min-width: 0; }
+.slash-menu__cmd { flex-shrink: 0; white-space: nowrap; }
 .slash-menu__desc {
   font-size: 12px;
   color: var(--text-muted);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ============ 聊天页文件变更条 ============ */
@@ -5517,3 +5553,160 @@ pre.tool-compact {
 /* 系统级弹窗(DialogHost:登录 prompt/危险确认/通知)永远置于业务浮层之上——
    否则会被后渲染的 ProviderSetupDialog 等盖住,用户看不到无法操作 */
 .app-dialog-overlay--system { z-index: 3000; }
+
+/* 斜杠菜单参数分组标题 */
+.slash-menu__group {
+  font-size: 10px;
+  color: var(--text-tertiary, #8a8782);
+  padding: 6px 10px 2px;
+  letter-spacing: 0.04em;
+}
+
+/* 已加载技能胶囊（composer 内，/ 菜单选中 skill 后显示） */
+/* 尺寸/间距全部由 .composer-chip 通用类接管（类名仅保留给测试/语义） */
+.composer-skill-chip { width: fit-content; }
+
+
+.composer-skill-chip__remove:hover { opacity: 1; }
+
+/* composer 通用胶囊（技能/附件统一形态） */
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-end; /* 图片卡高、技能/文件胶囊沉底与输入行对齐 */
+  /* 贴近 surface 顶边，与下方输入文字拉开距离 */
+  margin: 0 10px 8px;
+}
+.composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;       /* 技能/附件统一尺寸 */
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #e7ebe3;
+  color: #5d6f56;
+  font-size: 11px;
+  max-width: 260px;
+  box-sizing: border-box;
+}
+.composer-chip--image { height: 44px; padding: 0 8px 0 4px; }
+.composer-chip__thumb {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+.composer-chip__name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-chip__remove {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 0 1px;
+  opacity: 0.7;
+}
+.composer-chip__remove:hover { opacity: 1; }
+/* 附件胶囊走莫兰迪蓝灰，与技能胶囊（绿）区分 */
+.composer-chip--file {
+  background: #e4e9ee;
+  color: #5a7086;
+}
+
+/* 对话流中用户消息的技能徽标 */
+.user-bubble--skill {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.msg-skill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  color: #5d6f56;
+}
+.user-bubble__hint { opacity: 0.65; }
+
+/* 输入框图片附件：独立大缩略卡（参考 IM 附件预览样式） */
+.composer-image-card {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: visible;
+  flex-shrink: 0;
+}
+.composer-image-card img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+}
+.composer-image-card__remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: #4a4844;
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.composer-image-card__remove:hover { background: #2e2c29; }
+
+/* 图片大图预览 */
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 3200;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.image-lightbox img {
+  max-width: 84vw;
+  max-height: 84vh;
+  border-radius: 8px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
+}
+.image-lightbox__close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.image-lightbox__close:hover { background: rgba(255, 255, 255, 0.28); }

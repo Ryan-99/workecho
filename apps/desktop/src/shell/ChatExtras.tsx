@@ -107,7 +107,7 @@ export function SkillsSection() {
   };
 
   if (skills.length === 0) {
-    return <p className="ext-hint">暂无已安装的 skills。在 ~/.pi/agent/skills/ 放 SKILL.md 文件即可。</p>;
+    return <p className="ext-hint">暂无已安装的 skills。在技能目录（~/.pi/agent/skills/）放入 SKILL.md 文件即可。</p>;
   }
 
   return (

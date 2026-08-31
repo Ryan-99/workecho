@@ -383,7 +383,7 @@ function CustomProviderForm({ wsId, existingIds, customs, onSaved, onCancel }: {
         <button className="btn-ghost" onClick={onCancel}>取消</button>
       </div>
       {error && <div className="provider-error">{error}</div>}
-      <div className="form-note">注意：自定义 provider 默认用 openai-completions API。如果需要 openai-responses（如 Echoly relay），请手动编辑 ~/.pi/agent/models.json。</div>
+      <div className="form-note">注意：自定义 provider 默认用 openai-completions API。如果需要 openai-responses（如 Echoly relay），请手动编辑配置目录下的 ~/.pi/agent/models.json。</div>
     </div>
   );
 }
@@ -424,7 +424,7 @@ function SystemPromptSection() {
       <h2>系统提示词</h2>
       <p className="section-desc">
         定义 AI 助手的角色、能力和工作方式。修改后新会话即时生效。这是写入 workspace 的 AGENTS.md，
-        pi 会自动读取作为系统提示词。
+        Workecho 会自动读取作为系统提示词。
       </p>
       {editing ? (
         <>

@@ -488,11 +488,16 @@ function createWindow(): BrowserWindow {
     }
 
     if (platformModifier && !input.shift && lowerKey === "v") {
-      const clipboardImage = readClipboardImageAttachment();
-      if (clipboardImage) {
-        event.preventDefault();
-        window.webContents.send(desktopIpc.clipboardImagePasted, clipboardImage);
-        return;
+      // 混合剪贴板（图+文本并存，如 Office/网页复制）优先走默认文本粘贴——
+      // U-05：此前有图即拦截，导致贴文本变成贴图
+      const hasText = clipboard.readText().trim().length > 0;
+      if (!hasText) {
+        const clipboardImage = readClipboardImageAttachment();
+        if (clipboardImage) {
+          event.preventDefault();
+          window.webContents.send(desktopIpc.clipboardImagePasted, clipboardImage);
+          return;
+        }
       }
     }
 

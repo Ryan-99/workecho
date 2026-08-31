@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type RefObject } from "react";
-import { ArrowUp, Square, Paperclip, FileEdit, FileText, AtSign, Minimize2, ChevronDown, ChevronRight, ListChecks, RotateCcw, Plus } from "lucide-react";
+import { ArrowUp, Square, Paperclip, FileEdit, FileText, AtSign, Minimize2, ChevronDown, ChevronRight, ListChecks, RotateCcw, Plus, Sparkles } from "lucide-react";
 import type { DesktopAppState, SelectedTranscriptRecord, ComposerAttachment } from "../desktop-state";
 import type { ChangedFilesResult, ChangedFileEntry } from "../ipc";
 import { ModelSelector } from "./ModelSelector";
@@ -46,6 +46,8 @@ function TerminalSlot({ show, state }: { show: boolean; state: DesktopAppState }
   return <div className={closing ? "terminal-slot closing" : "terminal-slot"}><TerminalPanel state={state} /></div>;
 }
 import { SlashMenu } from "./SlashMenu";
+import { ImageLightbox } from "./ImageLightbox";
+import { collectPastedFiles, filesToComposerAttachments } from "../composer-paste";
 import { appConfirm, appAlert } from "./app-dialog";
 
 interface Props {
@@ -75,6 +77,10 @@ export function ChatPanel({ state, transcript, sending, showTerminal, onSend, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionKey]);
   const [planOn, setPlanOn] = useState(false);
+  /** 已加载技能胶囊：/ 菜单选中 skill 后挂起，发送时自动拼 `/skill:name ` 前缀 */
+  const [skillChip, setSkillChip] = useState<{ command: string; label: string } | null>(null);
+  /** 图片大图预览（双击缩略卡打开） */
+  const [zoomImage, setZoomImage] = useState<{ src: string; name?: string } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const items = transcript?.transcript ?? [];
 
@@ -99,9 +105,60 @@ export function ChatPanel({ state, transcript, sending, showTerminal, onSend, on
 
   useEffect(() => { autoResize(); }, [text, autoResize]);
 
+  /** 压缩当前会话（+ 菜单与 /compact 命令共用） */
+  const handleCompact = async () => {
+    const ok = await appConfirm("压缩会话上下文？历史消息将被摘要替代，释放上下文空间。");
+    if (!ok) return;
+    try {
+      const st = await window.piApp.compactSession();
+      if (st) onStateRefresh?.(st);
+    } catch (e) {
+      appAlert(`压缩失败: ${(e as Error).message}`);
+    }
+  };
+
+  /** 菜单类受控写入：setText 后下一帧恢复光标并聚焦 */
+  const applyMenuText = (next: string, caret?: number) => {
+    setText(next);
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      if (typeof caret === "number") ta.setSelectionRange(caret, caret);
+      ta.focus();
+    });
+  };
+
+  /** 菜单选择完整命令后直接发送执行 */
+  const sendText = (t: string) => {
+    if (!t.trim() || sending) return;
+    setText("");
+    if (textareaRef.current) textareaRef.current.style.height = "24px";
+    onSend(t);
+  };
+
   const handleSubmit = () => {
     const t = text.trim();
-    // 有文字或有附件（粘贴的图片/文件）都可发送
+    // slash 模糊输入拦截：/thin 这类前缀有唯一候选时先补全（否则会当聊天发给模型）
+    if (t.startsWith("/") && !t.includes(" ")) {
+      const cmds = slashCommandCandidates(state, state.selectedWorkspaceId, state.selectedSessionId);
+      const starts = cmds.filter((c) => c.command.startsWith(t));
+      const hit = cmds.find((c) => c.command === t) ?? (starts.length === 1 ? starts[0] : undefined);
+      if (hit && hit.command !== t) {
+        applyMenuText(`${hit.command} `, hit.command.length + 1);
+        return;
+      }
+    }
+    // 已加载技能胶囊：发送文本自动拼技能调用前缀（仅附件也可发送，U-07）
+    if (skillChip) {
+      if ((!t && state.composerAttachments.length === 0) || sending) return;
+      const outgoing = `${skillChip.command} ${t}`;
+      setSkillChip(null);
+      setText("");
+      if (textareaRef.current) textareaRef.current.style.height = "24px";
+      onSend(outgoing);
+      return;
+    }
+    // 有文字或有附件（粘贴的图片/文件）都可发送；技能胶囊挂起时附件路径同样拼技能前缀
     if ((!t && state.composerAttachments.length === 0) || sending) return;
     setText("");
     if (textareaRef.current) textareaRef.current.style.height = "24px";
@@ -117,11 +174,29 @@ export function ChatPanel({ state, transcript, sending, showTerminal, onSend, on
 
   // 粘贴/拖放：图片转 base64 附件，文件经 webUtils 取真实路径
   const handlePaste = async (e: React.ClipboardEvent) => {
-    const files = collectFiles(e.clipboardData?.files);
+    // 截图位图在 clipboardData.items（files 为空），公共模块统一处理
+    const files = collectPastedFiles(e.clipboardData ?? null);
     if (files.length === 0) return;
     e.preventDefault();
     await addPastedFiles(files);
   };
+
+  // 焦点兜底：从截图工具切回窗口直接 Ctrl+V 时，焦点往往不在 textarea
+  // （paste 落在 body，textarea 的 onPaste 收不到）——document 捕获态兜住
+  useEffect(() => {
+    const onDocPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable)) {
+        return; // 输入框自身的 onPaste 已处理
+      }
+      const files = collectPastedFiles(e.clipboardData ?? null);
+      if (files.length === 0) return;
+      e.preventDefault();
+      void addPastedFiles(files);
+    };
+    document.addEventListener("paste", onDocPaste, true);
+    return () => document.removeEventListener("paste", onDocPaste, true);
+  }, []);
 
   const handleDrop = async (e: React.DragEvent) => {
     const files = collectFiles(e.dataTransfer?.files);
@@ -132,37 +207,14 @@ export function ChatPanel({ state, transcript, sending, showTerminal, onSend, on
   };
 
   const addPastedFiles = async (files: readonly File[]) => {
-    const attachments: ComposerAttachment[] = [];
-    for (const file of files) {
-      if (file.type.startsWith("image/")) {
-        if (file.size > MAX_PASTE_IMAGE_BYTES) continue;
-        try {
-          const buf = new Uint8Array(await file.arrayBuffer());
-          attachments.push({
-            id: crypto.randomUUID(),
-            kind: "image",
-            name: file.name || "pasted-image.png",
-            mimeType: file.type,
-            data: bytesToBase64(buf),
-          });
-        } catch { /* 单个失败跳过 */ }
-      } else {
-        const fsPath = window.piApp.getPathForFile?.(file);
-        if (fsPath) {
-          attachments.push({
-            id: crypto.randomUUID(),
-            kind: "file",
-            name: file.name,
-            mimeType: file.type || "application/octet-stream",
-            fsPath,
-            sizeBytes: file.size,
-          });
-        }
-      }
-    }
+    const attachments = await filesToComposerAttachments(files, {
+      getPathForFile: window.piApp.getPathForFile,
+      bytesToBase64,
+      maxImageBytes: MAX_PASTE_IMAGE_BYTES,
+    });
     if (attachments.length > 0) {
       try { await window.piApp.addComposerAttachments(attachments); } catch { /* 静默 */ }
-    }
+    };
   };
 
   return (
@@ -182,18 +234,44 @@ export function ChatPanel({ state, transcript, sending, showTerminal, onSend, on
         {/* Codex 1:1 结构：圆角卡片 surface → editor(textarea) → footer(模型+发送) */}
         <div className="composer__surface" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
           {/* 附件预览条（粘贴/上传的图片与文件） */}
-          {state.composerAttachments.length > 0 && (
-            <div className="composer-attachments">
-              {state.composerAttachments.map((a) => (
-                <div key={a.id} className="composer-attachment" title={a.name}>
-                  {a.kind === "image" ? (
-                    <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} />
-                  ) : (
-                    <span className="composer-attachment-file"><Paperclip size={11} />{a.name}</span>
-                  )}
+          {(skillChip || state.composerAttachments.length > 0) && (
+            <div className="composer-chips">
+              {state.composerAttachments.filter((a) => a.kind === "image").map((a) => (
+                <div
+                  key={a.id}
+                  className="composer-image-card"
+                  title={`${a.name ?? ""}（双击放大）`}
+                  onDoubleClick={() => setZoomImage({ src: `data:${a.mimeType};base64,${a.data}`, name: a.name })}
+                >
+                  <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} />
                   <button
                     type="button"
-                    className="composer-attachment-remove"
+                    className="composer-image-card__remove"
+                    title="移除图片"
+                    onClick={() => window.piApp.removeComposerAttachment(a.id).catch(() => {})}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                  >×</button>
+                </div>
+              ))}
+              {skillChip && (
+                <div className="composer-chip composer-chip--skill composer-skill-chip" title={`技能 ${skillChip.command}`}>
+                  <Sparkles size={11} />
+                  <span className="composer-chip__name composer-skill-chip__name">{skillChip.label}</span>
+                  <button
+                    type="button"
+                    className="composer-chip__remove composer-skill-chip__remove"
+                    title="移除技能"
+                    onClick={() => setSkillChip(null)}
+                  >×</button>
+                </div>
+              )}
+              {state.composerAttachments.filter((a) => a.kind !== "image").map((a) => (
+                <div key={a.id} className="composer-chip composer-chip--file" title={a.name}>
+                  <Paperclip size={11} />
+                  <span className="composer-chip__name">{a.name}</span>
+                  <button
+                    type="button"
+                    className="composer-chip__remove"
                     title="移除附件"
                     onClick={() => window.piApp.removeComposerAttachment(a.id).catch(() => {})}
                   >×</button>
@@ -201,16 +279,65 @@ export function ChatPanel({ state, transcript, sending, showTerminal, onSend, on
               ))}
             </div>
           )}
+          {zoomImage && (
+            <ImageLightbox src={zoomImage.src} alt={zoomImage.name} onClose={() => setZoomImage(null)} />
+          )}
           <div className="composer__editor">
-            <SlashMenu text={text} textareaRef={textareaRef} runtimeCommands={state.sessionCommandsBySession[`${state.selectedWorkspaceId}:${state.selectedSessionId}`]} />
-            <AtFileMenu text={text} textareaRef={textareaRef} workspaceId={state.selectedWorkspaceId} />
+            <SlashMenu
+              text={text}
+              textareaRef={textareaRef}
+              runtimeCommands={state.sessionCommandsBySession[`${state.selectedWorkspaceId}:${state.selectedSessionId}`]}
+              runtimeSkills={state.runtimeByWorkspace[state.selectedWorkspaceId]?.skills ?? []}
+              onSelect={(insertText, { send }) => {
+                if (send) {
+                  sendText(insertText.trim());
+                } else {
+                  applyMenuText(insertText, insertText.length);
+                }
+              }}
+              onSkillPick={(command, label) => {
+                setSkillChip({ command, label });
+                setText("");
+                requestAnimationFrame(() => textareaRef.current?.focus());
+              }}
+              onLocalAction={(action) => {
+                setText("");
+                if (textareaRef.current) textareaRef.current.style.height = "24px";
+                if (action.kind === "thinking") {
+                  window.piApp
+                    .setSessionThinkingLevel(
+                      state.selectedWorkspaceId,
+                      state.selectedSessionId ?? "",
+                      action.level as Parameters<typeof window.piApp.setSessionThinkingLevel>[2],
+                    )
+                    .then((st) => onStateRefresh?.(st))
+                    .catch((e) => appAlert(`设置思考级别失败: ${(e as Error).message}`));
+                } else if (action.kind === "tree") {
+                  window.dispatchEvent(new CustomEvent("open-tree-modal"));
+                } else if (action.kind === "compact") {
+                  void handleCompact();
+                }
+              }}
+            />
+            <AtFileMenu
+              text={text}
+              textareaRef={textareaRef}
+              workspaceId={state.selectedWorkspaceId}
+              onInsert={applyMenuText}
+            />
             <textarea
               ref={textareaRef}
               value={text}
               onChange={(e) => { setText(e.target.value); autoResize(); }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={planOn ? "计划模式：描述你的目标，助手将只读探索并给出行动方案，不会做任何修改" : "给 Workecho 助手发消息"}
+              placeholder={
+                skillChip
+                  ? `已加载技能「${skillChip.label}」，描述你的任务后发送`
+                  : planOn
+                    ? "计划模式：描述你的目标，助手将只读探索并给出行动方案，不会做任何修改"
+                    : "给 Workecho 助手发消息"
+              }
               rows={1}
             />
           </div>
@@ -253,15 +380,16 @@ export function ChatPanel({ state, transcript, sending, showTerminal, onSend, on
 }
 
 /** "@" 文件引用：输入 @ 唤出工作区文件过滤列表，Tab/点击把路径插入输入框（替换 @token） */
-function AtFileMenu({ text, textareaRef, workspaceId }: {
+function AtFileMenu({ text, textareaRef, workspaceId, onInsert }: {
   text: string;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   workspaceId: string;
+  /** 受控插入：由 ChatPanel setText 并恢复光标（直接改 DOM 会被 React 吞掉） */
+  onInsert: (nextText: string, caret: number) => void;
 }) {
   const [files, setFiles] = useState<string[] | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  // 光标前的 @token（@ 后跟非空白字符直到光标）
   const ta = textareaRef.current;
   const cursor = ta ? ta.selectionStart : text.length;
   const beforeCursor = text.slice(0, cursor);
@@ -269,7 +397,6 @@ function AtFileMenu({ text, textareaRef, workspaceId }: {
   const query = tokenMatch?.[2] ?? null;
   const active = query !== null;
 
-  // 菜单首次打开时懒加载文件列表
   useEffect(() => {
     if (!active || files !== null) return;
     window.piApp.listWorkspaceFiles(workspaceId)
@@ -280,39 +407,42 @@ function AtFileMenu({ text, textareaRef, workspaceId }: {
   const filtered = active && files
     ? files.filter((f) => f.toLowerCase().includes(query!.toLowerCase())).slice(0, 10)
     : [];
+  const filteredRef = useRef<string[]>([]);
+  filteredRef.current = filtered;
+  const itemRefs = useRef<(HTMLElement | null)[]>([]);
 
   useEffect(() => { setSelectedIndex(0); }, [query]);
+  useEffect(() => {
+    itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
 
   const insert = (file: string) => {
     const el = textareaRef.current;
-    if (!el) return;
-    const cur = el.selectionStart;
-    const before = el.value.slice(0, cur);
-    const after = el.value.slice(cur);
+    const cur = el ? el.selectionStart : text.length;
+    const before = text.slice(0, cur);
+    const after = text.slice(cur);
     const m = before.match(/(^|\s)@([^\s@]*)$/);
     if (!m) return;
-    const start = before.length - m[2]!.length - 1; // 含 @
-    el.value = el.value.slice(0, start) + file + " " + after;
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    const pos = start + file.length + 1;
-    el.setSelectionRange(pos, pos);
-    el.focus();
+    const start = before.length - m[2]!.length - 1;
+    const next = text.slice(0, start) + file + " " + after;
+    onInsert(next, start + file.length + 1);
   };
 
-  // 键盘导航（↑↓ 移动、Tab 选中）
   useEffect(() => {
     const el = textareaRef.current;
     if (!el || !active || filtered.length === 0) return;
     const handler = (e: KeyboardEvent) => {
+      const list = filteredRef.current;
+      if (list.length === 0) return;
       if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
+        e.preventDefault(); e.stopPropagation();
+        setSelectedIndex((i) => Math.min(i + 1, list.length - 1));
       } else if (e.key === "ArrowUp") {
-        e.preventDefault();
+        e.preventDefault(); e.stopPropagation();
         setSelectedIndex((i) => Math.max(i - 1, 0));
-      } else if (e.key === "Tab") {
-        e.preventDefault();
-        const f = filtered[selectedIndex];
+      } else if (e.key === "Tab" || e.key === "Enter") {
+        e.preventDefault(); e.stopPropagation();
+        const f = list[selectedIndex];
         if (f) insert(f);
       }
     };
@@ -327,6 +457,7 @@ function AtFileMenu({ text, textareaRef, workspaceId }: {
       {filtered.map((f, i) => (
         <div
           key={f}
+          ref={(el) => { itemRefs.current[i] = el; }}
           className={`slash-menu__item ${i === selectedIndex ? "active" : ""}`}
           onMouseEnter={() => setSelectedIndex(i)}
           onMouseDown={(e) => { e.preventDefault(); insert(f); }}
@@ -337,6 +468,22 @@ function AtFileMenu({ text, textareaRef, workspaceId }: {
       ))}
     </div>
   );
+}
+
+/** 当前会话可用的 slash 命令全集（内置 + 运行时注册），供菜单与发送拦截共用 */
+export function slashCommandCandidates(
+  state: DesktopAppState,
+  workspaceId: string,
+  sessionId: string | null | undefined,
+): Array<{ command: string; description?: string; source?: string }> {
+  const runtimeCommands = state.sessionCommandsBySession[`${workspaceId}:${sessionId ?? ""}`] ?? [];
+  return [
+    ...[
+      { command: "/compact" }, { command: "/thinking" }, { command: "/tree" },
+      { command: "/status" }, { command: "/reload" },
+    ],
+    ...runtimeCommands.map((c) => ({ command: `/${c.name}`, description: c.description, source: c.source })),
+  ];
 }
 
 /** "+" 操作面板：附件 / 引用工作区文件 / 计划模式 / 压缩会话（技能走 / 菜单） */

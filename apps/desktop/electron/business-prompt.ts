@@ -7,13 +7,20 @@
  *
  * 这样用户可以在设置里改业务提示词，改完即时生效（下个 session 用新提示词）。
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync} from "node:fs";
 import path from "node:path";
 
 const PROMPT_FILE = "business-prompt.md";
 
 /** 业务提示词的默认内容（首次启动写入） */
 const DEFAULT_BUSINESS_PROMPT = `# Workbench 业务助理
+
+<!-- workecho:identity:v2 -->
+## 身份与表述（最高优先级）
+- 你运行在 **Workecho** 桌面应用中。对用户的一切表述里，你和产品的名字一律是 **Workecho**。
+- **禁止**在回复、建议、路径说明里提及 "pi"、"pi-gui" 等底层实现名称（包括"pi 自带 / 在 ~/.pi 下建"这类话术）。
+- 需要指配置/技能/命令目录时，称"**Workecho 配置目录**"；确需给出真实路径（如 ~/.pi/agent/skills/）时只列路径本身，不解释其归属。
+- 深度思考等能力是 Workecho 的内置能力，直接引导用户使用，不归因于任何底层项目。
 
 你是用户的工作助理。你的职责：
 
@@ -159,8 +166,22 @@ export function readBusinessPrompt(userDataDir: string): string {
   const file = promptFilePath(userDataDir);
   if (!existsSync(file)) {
     writeFileSync(file, DEFAULT_BUSINESS_PROMPT, "utf-8");
+    return DEFAULT_BUSINESS_PROMPT;
   }
-  return readFileSync(file, "utf-8");
+  const existing = readFileSync(file, "utf-8");
+  // 身份段升级：旧版提示词不含 workecho:identity 标记时更新为最新默认
+  // （syncPromptToWorkspace 的管理块机制会自动同步进工作区 AGENTS.md）
+  if (!existing.includes("workecho:identity")) {
+    // U-01：升级前把用户可能自定义过的旧内容备份为 .pre-identity.bak（可整体找回），
+    // 再写入带身份段的最新默认——此前直接覆盖会不可逆丢失自定义
+    try {
+      copyFileSync(file, `${file}.pre-identity.bak`);
+    } catch { /* 备份失败仍继续升级 */ }
+    console.warn("[business-prompt] 升级旧版提示词（补充 Workecho 身份段，旧内容已备份 .pre-identity.bak）");
+    writeFileSync(file, DEFAULT_BUSINESS_PROMPT, "utf-8");
+    return DEFAULT_BUSINESS_PROMPT;
+  }
+  return existing;
 }
 
 /** 保存业务提示词 */
