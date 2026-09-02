@@ -15,7 +15,7 @@ test("buildSpawnEnv: 只透传白名单键，不含应用自有变量", () => {
   try {
     const env = buildSpawnEnv();
     assert.equal(env.WORKECHO_TEST_APP_VAR, undefined, "非白名单的应用变量不应透传");
-    assert.ok(env.PATH, "PATH 必须透传（命令解析依赖）");
+    assert.ok(env.PATH || env.Path, "PATH 必须透传（命令解析依赖；Windows CI 的键为 Path）");
     assert.equal(env.ELECTRON_RUN_AS_NODE, undefined);
   } finally {
     delete process.env.WORKECHO_TEST_APP_VAR;

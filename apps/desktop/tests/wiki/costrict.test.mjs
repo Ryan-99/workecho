@@ -151,7 +151,7 @@ test("costrictStatus: 汇总二进制/服务/key 状态", async () => {
   assert.equal(PROVIDER_ID, "costrict");
 });
 
-test("installBundledBinary: 从内置资源目录安装到托管目录", async ({ skip }) => {
+test("installBundledBinary: 从内置资源目录安装到托管目录", { skip: process.platform !== "win32" || process.arch !== "x64" }, async () => {
   const { installBundledBinary, managedBinaryPath } = await import("../../electron/costrict-service.ts");
   // S-09：内置二进制带哈希 pin——伪造内容必须被拒绝（走下载兜底）
   const fakeResDir = join(dir, "resources");
@@ -159,10 +159,6 @@ test("installBundledBinary: 从内置资源目录安装到托管目录", async (
   writeFileSync(join(fakeResDir, "costrict", "windows-x64", "costrict-router.exe"), "FAKE_BIN");
   assert.equal(installBundledBinary({ resourcesDir: fakeResDir, dir: join(dir, "m-fake") }), false);
   // 真实随包资源：仅在本机就是 windows-x64 时可测（其他平台没有内置资源）
-  if (process.platform !== "win32" || process.arch !== "x64") {
-    skip("本机非 windows-x64，无随包二进制可装");
-    return;
-  }
   const realResDir = join(process.cwd(), "resources");
   const managed = join(dir, "managed");
   const ok1 = installBundledBinary({ resourcesDir: realResDir, dir: managed });

@@ -57,6 +57,6 @@ test("应用打包目录内置官方 skill-creator（SKILL.md + 方法论存在�
   const p = join(process.cwd(), "resources", "skills", "skill-creator", "SKILL.md");
   if (!existsSync(p)) return; // 打包产物里才有的场景跳过（开发目录必有）
   const text = readFileSync(p, "utf-8");
-  assert.match(text, /^---\nname: skill-creator/m, "frontmatter 完整");
+  assert.match(text, /^---\r?\nname: skill-creator/m, "frontmatter 完整");
   assert.ok(text.length > 5000, "官方方法论应为完整版而非摘要");
 });
