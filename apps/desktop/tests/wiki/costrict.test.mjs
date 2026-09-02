@@ -140,7 +140,8 @@ test("costrictStatus: 汇总二进制/服务/key 状态", async () => {
   });
   assert.deepEqual(s, { binaryPresent: false, serviceRunning: false, apiKeySaved: false, localBaseUrl: LOCAL_BASE_URL });
   // 有二进制 + 服务在线 + key 已存
-  writeFileSync(join(dir, "costrict-router.exe"), "bin");
+  const { binaryName } = await import("../../electron/costrict-service.ts");
+  writeFileSync(join(dir, binaryName()), "bin");
   writeState(dir, { apiKey: "sk-costrict-x" });
   s = await costrictStatus({
     dir,

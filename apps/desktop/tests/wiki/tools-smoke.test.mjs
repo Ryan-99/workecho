@@ -73,7 +73,9 @@ test("冒烟: Skill 工具链（create + list）", async () => {
 
 test("冒烟: 插件工具链（create + list + remove）", async () => {
   // 插件工具受 selfModifyPlugins 开关控制（默认关）——测试里先开启
-  patchWikiConfig(join(root, "AppData", "Roaming", "pi"), { selfModifyPlugins: true });
+  patchWikiConfig(join(root, ...(process.platform === "darwin" ? ["Library", "Application Support", "pi"]
+  : process.platform === "linux" ? [(process.env.XDG_CONFIG_HOME ?? join(root, ".config")), "pi"]
+  : ["AppData", "Roaming", "pi"])), { selfModifyPlugins: true });
   const code = `export default function(pi) { pi.registerTool({ name: "smoke_tool", description: "d", parameters: { type: "object", properties: {} }, async execute() { return { content: [{ type: "text", text: "ok" }], details: {} }; } }); }`;
   const r1 = await run("wiki_create_plugin", { name: "smoke-plugin", code }, root);
   assert.match(r1.content[0].text, /已创建插件/);

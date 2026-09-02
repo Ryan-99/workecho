@@ -110,8 +110,11 @@ afterEach(() => {
 
 test("C6 tool_call 命中 block 规则时返回 { block, reason } 否决", async () => {
   // 配置：管道 + hooks 开
-  mkdirSync(join(homeTmp, "AppData/Roaming/pi"), { recursive: true });
-  writeFileSync(join(homeTmp, "AppData/Roaming/pi/wiki-config.json"), JSON.stringify({ pipelineEnabled: true, hooksEnabled: true }));
+  const cfgDir = join(homeTmp, ...(process.platform === "darwin" ? ["Library", "Application Support", "pi"]
+    : process.platform === "linux" ? [(process.env.XDG_CONFIG_HOME ?? join(homeTmp, ".config")), "pi"]
+    : ["AppData", "Roaming", "pi"]));
+  mkdirSync(cfgDir, { recursive: true });
+  writeFileSync(join(cfgDir, "wiki-config.json"), JSON.stringify({ pipelineEnabled: true, hooksEnabled: true }));
   // 工作区：一条 block 规则
   const ws = mkdtempSync(join(tmpdir(), "wb-ws-"));
   mkdirSync(join(ws, "workbench/wiki"), { recursive: true });
