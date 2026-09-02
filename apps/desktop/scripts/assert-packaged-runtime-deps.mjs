@@ -87,7 +87,7 @@ const packagePlatform = (process.env.PI_APP_PACKAGE_PLATFORM ?? process.platform
 const asarPath = resolveAsarPath(desktopDir, packagePlatform);
 const notificationHelperPath =
   packagePlatform === "darwin"
-    ? path.join(desktopDir, "release", "mac-arm64", "pi-gui.app", "Contents", "MacOS", "pi-gui-notification-status-helper")
+    ? path.join(desktopDir, "release", "mac-arm64", "Workecho.app", "Contents", "MacOS", "pi-gui-notification-status-helper")
     : undefined;
 const pnpmBinary = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const piCodingAgentPackageName = "@earendil-works/pi-coding-agent";
@@ -199,7 +199,17 @@ console.log(`Verified packaged runtime dependencies in ${asarPath}`);
 
 function resolveAsarPath(desktopDir, packagePlatform) {
   if (packagePlatform === "darwin") {
-    return path.join(desktopDir, "release", "mac-arm64", "pi-gui.app", "Contents", "Resources", "app.asar");
+    // productName 品牌化为 Workecho 后 .app 名随之变化——动态发现 mac-arm64 下的 *.app
+    const macDir = path.join(desktopDir, "release", "mac-arm64");
+    if (existsSync(macDir)) {
+      const appDir = readdirSync(macDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.endsWith(".app"))
+        .map((entry) => entry.name)[0];
+      if (appDir) {
+        return path.join(macDir, appDir, "Contents", "Resources", "app.asar");
+      }
+    }
+    return path.join(desktopDir, "release", "mac-arm64", "Workecho.app", "Contents", "Resources", "app.asar");
   }
 
   if (packagePlatform === "linux") {
