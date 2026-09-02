@@ -379,6 +379,12 @@ contextBridge.exposeInMainWorld("piApp", {
   // CoStrict 一键接入（托管 costrict-router，登录/断开走 loginProvider/logoutProvider）
   costrictStatus: () => ipcRenderer.invoke("workbench:costrict-status"),
   // 模型服务配置引导（首次发消息时 pi 要 API key → 主进程拦截转完整 provider 列表弹窗）
+  submitFeedback: (input: { kind: string; text: string; includeDiagnostics: boolean; imageBase64?: string }) =>
+    ipcRenderer.invoke("workbench:feedback-submit", input) as Promise<{ ok: boolean; channel: string; message: string; savedPath?: string }>,
+  getFeedbackWebhook: () => ipcRenderer.invoke("workbench:feedback-webhook-get") as Promise<string>,
+  setFeedbackWebhook: (url: string) => ipcRenderer.invoke("workbench:feedback-webhook-set", url) as Promise<boolean>,
+  getFeedbackDiagnostics: () => ipcRenderer.invoke("workbench:feedback-diagnostics") as Promise<string>,
+  hasBuiltinFeedbackChannel: () => ipcRenderer.invoke("workbench:feedback-webhook-default") as Promise<boolean>,
   onProviderSetupNeeded: (listener: (p: { message: string }) => void) => {
     const handler = (_e: unknown, payload: any) => listener(payload);
     ipcRenderer.on("workbench:provider-setup-needed", handler);

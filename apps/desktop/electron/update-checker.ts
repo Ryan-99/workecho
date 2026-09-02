@@ -1,4 +1,5 @@
 import { app, net, Notification, shell } from "electron";
+import { workechoNotificationIcon } from "./brand-notification";
 
 const RELEASES_URL =
   "https://api.github.com/repos/Ryan-Sangfor/workbench/releases?per_page=1";
@@ -49,6 +50,7 @@ export function showUpdateNotification(
     return;
   }
   const notification = new Notification({
+    ...(workechoNotificationIcon() ? { icon: workechoNotificationIcon()! } : {}),
     title: "pi-gui Release Available",
     body: `Version ${latestVersion} is available (you have ${currentVersion}). Click to view the release.`,
   });

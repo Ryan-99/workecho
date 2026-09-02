@@ -8,6 +8,7 @@
  * 用户可在设置里调整 leadMinutes（写入 settings.json）。
  */
 import { Notification } from "electron";
+import { workechoNotificationIcon } from "./brand-notification";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { listEntities } from "./business-store";
@@ -112,7 +113,7 @@ export class TodoReminderService {
           : `${title}（${Math.ceil(diff / 60000)} 分钟后到期）`;
 
         if (Notification.isSupported()) {
-          new Notification({ title: "待办提醒", body, silent: false }).show();
+          new Notification({ title: "待办提醒", body, silent: false, ...(workechoNotificationIcon() ? { icon: workechoNotificationIcon()! } : {}) }).show();
         }
         this.reminded[id] = true;
         notified = true;
@@ -129,6 +130,7 @@ export class TodoReminderService {
         title: "待办已完成",
         body: title,
         silent: false,
+        ...(workechoNotificationIcon() ? { icon: workechoNotificationIcon()! } : {}),
       }).show();
     }
   }

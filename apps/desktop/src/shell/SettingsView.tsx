@@ -943,6 +943,20 @@ function HooksSettingsSection() {
 function AboutSection() {
   const [checking, setChecking] = useState(false);
   const [updateResult, setUpdateResult] = useState<string | undefined>();
+  const [webhook, setWebhook] = useState("");
+  const [webhookSaved, setWebhookSaved] = useState(false);
+
+  useEffect(() => {
+    window.piApp.getFeedbackWebhook().then(setWebhook).catch(() => {});
+  }, []);
+
+  const saveWebhook = async () => {
+    try {
+      await window.piApp.setFeedbackWebhook(webhook);
+      setWebhookSaved(true);
+      setTimeout(() => setWebhookSaved(false), 1500);
+    } catch { /* ignore */ }
+  };
 
   const handleCheck = async () => {
     setChecking(true);
@@ -969,6 +983,19 @@ function AboutSection() {
   return (
     <section className="settings-section">
       <h2>关于</h2>
+      <div className="settings-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+        <label>反馈通道覆盖（维护者用，普通用户无需理会）</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={webhook}
+            onChange={(e) => setWebhook(e.target.value)}
+            placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…"
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <button className="btn-primary" onClick={() => { void saveWebhook(); }}>{webhookSaved ? "已保存" : "保存"}</button>
+        </div>
+        <span className="hint">在企业微信群添加"机器人"后复制 Webhook 地址填到这里；用户点侧栏"反馈"即直达到群。默认通道已内置随包分发，留空即用内置；仅维护者排障时覆盖。</span>
+      </div>
       <div className="settings-row"><label>版本</label><span className="hint">Workecho</span></div>
       <div className="settings-row"><label>平台</label><span className="hint">{window.piApp.platform}</span></div>
       <div className="settings-row" style={{ paddingTop: 12 }}>

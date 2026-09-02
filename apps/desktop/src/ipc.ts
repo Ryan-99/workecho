@@ -437,6 +437,11 @@ export interface PiDesktopApi {
   appDialogResult(id: number, result: { ok: boolean; value?: string }): Promise<void>;
   onAppDialog(listener: (spec: unknown) => void): () => void;
   onCostrictEvent(listener: (e: { step: string; message: string }) => void): () => void;
+  submitFeedback(input: { kind: string; text: string; includeDiagnostics: boolean; imageBase64?: string }): Promise<{ ok: boolean; channel: string; message: string; savedPath?: string }>;
+  getFeedbackWebhook(): Promise<string>;
+  setFeedbackWebhook(url: string): Promise<boolean>;
+  getFeedbackDiagnostics(): Promise<string>;
+  hasBuiltinFeedbackChannel(): Promise<boolean>;
   /** 首次发消息时 pi 要 API key 被拦截 → 渲染层弹出完整 provider 配置引导 */
   onProviderSetupNeeded(listener: (p: { message: string }) => void): () => void;
   onToolProgress(

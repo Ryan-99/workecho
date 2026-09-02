@@ -49,10 +49,10 @@ test("fork from a transcript message creates a new session after in-app confirm"
     const beforeCount = beforeWs?.sessions.length ?? 0;
     const beforeSelected = before.selectedSessionId;
 
-    // hover 第二轮回答 → 「从此分支」→ 应用内确认
-    const secondAnswer = window.locator(".msg", { hasText: "Second fork answer" }).first();
-    await secondAnswer.hover();
-    await secondAnswer.getByRole("button", { name: "从此分支" }).click();
+    // 分支入口已收敛到最后一条消息（Ryan 反馈）→ hover 最后一条回答
+    const lastAnswer = window.locator(".msg", { hasText: "Third fork answer" }).first();
+    await lastAnswer.hover();
+    await lastAnswer.getByRole("button", { name: "从此分支" }).click();
     const dialog = window.locator(".app-dialog");
     await expect(dialog).toBeVisible({ timeout: 10_000 });
     await expect(dialog).toContainText("重开分支");
@@ -70,7 +70,7 @@ test("fork from a transcript message creates a new session after in-app confirm"
     const after = await getDesktopState(window);
     expect(after.selectedSessionId).not.toBe(beforeSelected);
     await expect(window.locator(".chat-panel")).toContainText("Second fork answer");
-    await expect(window.locator(".chat-panel")).not.toContainText("Third fork question");
+    await expect(window.locator(".chat-panel")).toContainText("Third fork answer");
   } finally {
     await harness.close();
   }

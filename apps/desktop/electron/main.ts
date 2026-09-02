@@ -34,6 +34,8 @@ import {
   costrictLogin, costrictStart, costrictKeyReset, costrictRestart, costrictStop, costrictStatus, downloadBinary, installBundledBinary, fetchCostrictModels, readState as costrictReadState, writeState as costrictWriteState, setSecretCodec as setCostrictSecretCodec, managedBinaryPath, waitHealthy as waitCostrictHealthy,
 } from "./costrict-service";
 import { createPolicyExtension, setHookNotifier, setDangerousOpConfirmer } from "./tool-pipeline";
+import { workechoNotificationIcon } from "./brand-notification";
+import { submitFeedback, buildDiagnostics, resolveFeedbackWebhooks } from "./feedback-service";
 import { createMemoryInjectionExtension } from "./memory-injection";
 import { updateMemory, getWikiStats, getWikiGraph, searchWiki, listWikiPages, readWikiPage, appendToLog } from "./wiki-manager";
 import { isPlanMode, setPlanMode } from "./plan-mode";
@@ -91,6 +93,12 @@ import type {
 import type { SessionDriverEvent } from "@pi-gui/session-driver";
 import type { GenerateThreadTitleOptions } from "@pi-gui/pi-sdk-driver";
 import type { SessionRef, WorkspaceRef } from "@pi-gui/session-driver";
+
+// Windows 通知来源标识：与 electron-builder appId 一致，
+// 否则系统通知顶部显示宿主进程名（开发模式下为 Electron 字样）
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.workecho.desktop");
+}
 
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL);
 const appTestMode = resolveAppTestMode(process.env.PI_APP_TEST_MODE);
@@ -1245,6 +1253,7 @@ app.whenReady().then(async () => {
     console.warn("[mcp] mcp-servers.json 在应用外被修改，本次会话停用 MCP 扩展（fail-closed）");
     try {
       new Notification({
+      ...(workechoNotificationIcon() ? { icon: workechoNotificationIcon()! } : {}),
         title: "Workecho：MCP 扩展已停用",
         body: "检测到 MCP 配置在应用外被修改。请到 设置 → MCP 扩展 检查后保存以恢复。",
       }).show();
@@ -1284,7 +1293,7 @@ app.whenReady().then(async () => {
 
   // Hook 桌面通知（策略层解耦：不直接依赖 electron，见 tool-pipeline.ts）
   setHookNotifier((title, body) => {
-    try { new Notification({ title, body }).show(); } catch { /* 通知失败忽略 */ }
+    try { new Notification({ title, body, ...(workechoNotificationIcon() ? { icon: workechoNotificationIcon()! } : {}) }).show(); } catch { /* 通知失败忽略 */ }
   });
   // 危险操作确认（P2 补全）：应用内弹窗，拒绝则否决工具执行
   setDangerousOpConfirmer(async (title, body) => {
@@ -1350,7 +1359,7 @@ app.whenReady().then(async () => {
     },
     log: (workspacePath, line) => appendToLog(workspacePath, line),
     notify: (title, body) => {
-      try { new Notification({ title, body }).show(); } catch { /* 通知失败忽略 */ }
+      try { new Notification({ title, body, ...(workechoNotificationIcon() ? { icon: workechoNotificationIcon()! } : {}) }).show(); } catch { /* 通知失败忽略 */ }
     },
     skillsBase: userSkillsRoot(),
   });
@@ -2101,6 +2110,26 @@ app.whenReady().then(async () => {
     }
     return true;
   });
+  // 用户反馈（企业微信机器人 webhook；未配置则本地留底）
+  const FEEDBACK_WEBHOOK_FILE = () => path.join(configuredUserDataDir, "feedback-webhook.json");
+  const readFeedbackWebhook = (): string => {
+    try {
+      return String(JSON.parse(readFileSync(FEEDBACK_WEBHOOK_FILE(), "utf8")).url ?? "").trim();
+    } catch { return ""; }
+  };
+  ipcMain.handle("workbench:feedback-submit", async (_event, input: {
+    kind: "bug" | "suggestion" | "ux" | "other";
+    text: string;
+    includeDiagnostics: boolean;
+    imageBase64?: string;
+  }) => submitFeedback(input, readFeedbackWebhook() || undefined));
+  ipcMain.handle("workbench:feedback-webhook-default", () => resolveFeedbackWebhooks().length > 0);
+  ipcMain.handle("workbench:feedback-webhook-get", () => readFeedbackWebhook());
+  ipcMain.handle("workbench:feedback-webhook-set", (_event, url: string) => {
+    writeFileSync(FEEDBACK_WEBHOOK_FILE(), JSON.stringify({ url: url.trim() }, null, 2), "utf-8");
+    return true;
+  });
+  ipcMain.handle("workbench:feedback-diagnostics", () => buildDiagnostics());
   ipcMain.handle(desktopIpc.stateRequest, (event) => store.getStateForView(viewForWebContents(event.sender.id)));
   ipcMain.handle(desktopIpc.selectedTranscriptRequest, (event) =>
     store.getSelectedTranscriptForView(viewForWebContents(event.sender.id)),

@@ -13,6 +13,7 @@ import { WelcomeView } from "./shell/WelcomeView";
 import { DialogHost } from "./shell/app-dialog";
 import { OnboardingView } from "./shell/OnboardingView";
 import { ProviderSetupDialog } from "./shell/ProviderSetupDialog";
+import { FeedbackDialog } from "./shell/FeedbackDialog";
 import { ArchiveView } from "./shell/ArchiveView";
 import { ScheduleManagerView } from "./shell/ScheduleManagerView";
 import { WikiView } from "./shell/WikiView";
@@ -29,6 +30,7 @@ export default function App() {
   const [defaultPath, setDefaultPath] = useState("");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("appearance");
   const [showArchive, setShowArchive] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [showTree, setShowTree] = useState(false);
 
@@ -536,11 +538,12 @@ export default function App() {
           />
             )}
           </main>
-          <StatusPanel state={state} sidebarCollapsed={sidebarCollapsed} width={statusWidth} onResize={handleStatusResize} />
+          <StatusPanel state={state} sidebarCollapsed={sidebarCollapsed} width={statusWidth} onResize={handleStatusResize} onFeedback={() => setShowFeedback(true)} />
         </>
       )}
       <ExtensionDialogs state={state} />
       {showTree && <TreeModal state={state} onClose={() => setShowTree(false)} />}
+      {showFeedback && <FeedbackDialog onClose={() => setShowFeedback(false)} />}
       {showArchive && (
         <ArchiveView
           archivedSessions={archivedSessions}

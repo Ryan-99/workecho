@@ -813,11 +813,17 @@ export class SessionSupervisor {
   async cancelCurrentRun(sessionRef: SessionRef): Promise<void> {
     const record = this.records.get(sessionKey(sessionRef));
     if (!record?.session) {
+      console.warn(`[cancel-diag] no record/session for ${sessionKey(sessionRef)}; keys=${[...this.records.keys()].join(",")}`);
       return;
     }
 
     try {
+      // 诊断:abort 前后 session 状态
+      const before = (record.session as unknown as { isIdle?: boolean }).isIdle;
+      console.warn(`[cancel-diag] aborting ${sessionKey(sessionRef)} isIdle=${String(before)}`);
       await record.session.abort();
+      const after = (record.session as unknown as { isIdle?: boolean }).isIdle;
+      console.warn(`[cancel-diag] aborted isIdle=${String(after)}`);
     } catch (error) {
       // Abort is best-effort. Even if the runtime reports a failure we still
       // reset local run state below so the UI does not stay stuck on "running".
@@ -1235,6 +1241,21 @@ export class SessionSupervisor {
       this.records.set(nextKey, record);
     }
 
+    // 替换前必须中止旧实例的运行中流：rebind 只换引用不解绑运行，
+    // 旧 AgentSession 会成为"孤儿流"继续写会话文件（delta 经 disk-tail 回流 UI），
+    // 且 cancelCurrentRun 打在新实例上无效——表现为"停止键没反应"
+    const previousSession = record.session;
+    if (previousSession && previousSession !== session) {
+      const prevIdle = (previousSession as unknown as { isIdle?: boolean }).isIdle;
+      if (prevIdle === false) {
+        try {
+          await previousSession.abort();
+          console.warn(`[supervisor] rebind: aborted orphaned running session ${previousKey}`);
+        } catch (error) {
+          console.warn(`[supervisor] rebind: abort of previous session failed:`, (error as Error).message);
+        }
+      }
+    }
     record.session = session;
     record.sessionFile = session.sessionFile ?? session.sessionManager.getSessionFile();
     record.unsubscribeAgent?.();

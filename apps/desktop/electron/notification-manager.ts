@@ -1,4 +1,5 @@
 import { Notification, type BrowserWindow } from "electron";
+import { workechoNotificationIcon } from "./brand-notification";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { DesktopAppStore } from "./app-store";
@@ -262,6 +263,7 @@ export class NotificationManager {
       title,
       body,
       silent: false,
+      ...(workechoNotificationIcon() ? { icon: workechoNotificationIcon()! } : {}),
     });
     notification.on("click", () => {
       void this.openSession(sessionRef);

@@ -8,6 +8,7 @@
  * 有提醒时通过 Electron Notification API 推送桌面通知。
  */
 import { Notification } from "electron";
+import { workechoNotificationIcon } from "./brand-notification";
 import { listEntities, type EntityData } from "./business-store";
 
 const DAY = 86400000;
@@ -82,9 +83,10 @@ function pushReminders(bundle: ReminderBundle): void {
 
   if (Notification.isSupported()) {
     const n = new Notification({
-      title: "Workbench 提醒",
+      title: "Workecho 提醒",
       body: lines.join("\n"),
       silent: false,
+      ...(workechoNotificationIcon() ? { icon: workechoNotificationIcon()! } : {}),
     });
     n.show();
   }

@@ -37,6 +37,9 @@ jobs:
         run: pnpm verify:release-version --tag "$GITHUB_REF_NAME"
       - run: pnpm typecheck
       - run: pnpm --filter @workecho/desktop run build
+        env:
+          # 反馈通道注入（构建期 define 进产物；值只存 GitHub secrets，不进仓库）
+          WORKECHO_FEEDBACK_WEBHOOKS: ${{ secrets.WORKECHO_FEEDBACK_WEBHOOKS }}
       - name: Package Windows (installer + portable)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -69,6 +72,8 @@ jobs:
         run: pnpm verify:release-version --tag "$GITHUB_REF_NAME"
       - run: pnpm typecheck
       - run: pnpm --filter @workecho/desktop run build
+        env:
+          WORKECHO_FEEDBACK_WEBHOOKS: ${{ secrets.WORKECHO_FEEDBACK_WEBHOOKS }}
       - name: Package macOS (dmg + zip)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash

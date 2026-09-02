@@ -759,7 +759,7 @@ body {
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
-  scroll-behavior: smooth;
+  /* scroll-behavior: smooth 已移除：切会话直接落底，流式跟随无滞后滑动 */
   /* 导入/连发消息时内容高度跳变，滚动条出现/消失会挤压内容宽度导致闪烁——固定占位 */
   scrollbar-gutter: stable;
 }
@@ -3182,7 +3182,7 @@ pre.tool-compact {
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
-  scroll-behavior: smooth;
+  /* scroll-behavior: smooth 已移除：切会话直接落底，流式跟随无滞后滑动 */
   /* 导入/连发消息时内容高度跳变，滚动条出现/消失会挤压内容宽度导致闪烁——固定占位 */
   scrollbar-gutter: stable;
 }
@@ -4102,6 +4102,8 @@ pre.tool-compact {
 
 /* ============ 右侧状态面板（workbench 风格卡片） ============ */
 .status-panel {
+  display: flex;
+  flex-direction: column;
   width: var(--status-w);
   flex-shrink: 0;
   background: var(--bg-status);
@@ -5710,3 +5712,67 @@ pre.tool-compact {
   justify-content: center;
 }
 .image-lightbox__close:hover { background: rgba(255, 255, 255, 0.28); }
+
+/* 侧栏会话列表防横向溢出（Ryan：长标题撑出横向滚动条）：
+ * session-list 默认 overflow-y:auto 在某方向内容超宽时出现横向滚动；
+ * 收缩链补 min-width:0（item-wrap 的 grid 布局不收缩子项是超宽根因），
+ * 并显式禁掉横向滚动 */
+.session-list { overflow-x: hidden; }
+.session-item-wrap { min-width: 0; max-width: 100%; }
+.session-group-body { min-width: 0; }
+.session-item { min-width: 0; max-width: 100%; }
+
+/* ============ 用户反馈弹窗 ============ */
+.feedback-dialog { max-width: 480px; width: min(480px, calc(100vw - 48px)); text-align: left; }
+.feedback-kinds { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
+.feedback-kind {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--border-light, #e3e1dd); background: none;
+  border-radius: 999px; padding: 4px 12px; font-size: 12px;
+  color: var(--text-secondary, #6e6b66); cursor: pointer;
+}
+.feedback-kind.active { background: #e7ebe3; color: #5d6f56; border-color: #b9c6b0; }
+.feedback-text {
+  width: 100%; box-sizing: border-box;
+  border: 1px solid var(--border-light, #e3e1dd); border-radius: 8px;
+  padding: 10px 12px; font-size: 13px; font-family: inherit; resize: vertical;
+}
+.feedback-shot { position: relative; margin-top: 8px; width: fit-content; }
+.feedback-shot img { max-width: 100%; max-height: 160px; border-radius: 8px; border: 1px solid var(--border-light, #e3e1dd); display: block; }
+.feedback-shot button {
+  position: absolute; top: -6px; right: -6px; width: 18px; height: 18px;
+  border-radius: 50%; border: none; background: #4a4844; color: #fff;
+  font-size: 11px; line-height: 18px; padding: 0; cursor: pointer;
+}
+.feedback-diag-toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-secondary, #6e6b66); margin: 10px 0 6px; cursor: pointer;
+}
+.feedback-diag-preview {
+  background: var(--bg-muted, #faf9f7); border: 1px solid var(--border-light, #e3e1dd);
+  border-radius: 6px; padding: 8px 10px; font-size: 11px; line-height: 1.5;
+  max-height: 110px; overflow-y: auto; white-space: pre-wrap; margin: 0 0 10px;
+  color: var(--text-muted, #8a8782);
+}
+.feedback-result { font-size: 12px; margin-bottom: 8px; }
+.feedback-result.ok { color: #5d6f56; }
+.feedback-result.bad { color: var(--danger, #c0392b); }
+.feedback-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* 工作台底部反馈入口 */
+.status-panel-footer {
+  margin-top: auto;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-light, #e3e1dd);
+  display: flex;
+}
+.status-feedback-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px dashed var(--border-light, #cfccc6); background: none;
+  border-radius: 8px; padding: 6px 12px; font-size: 12px;
+  color: var(--text-secondary, #6e6b66); cursor: pointer; flex: 1;
+  justify-content: center;
+}
+.status-feedback-btn:hover { border-color: #b3b0aa; color: var(--text, #3c3c3c); }
+/* 工作台内容区滚动，footer 固定底部 */
+.status-panel-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }

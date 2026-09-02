@@ -118,6 +118,15 @@ const GROUP_MIN = 3;
 
 export function renderTimelineItems(items: readonly unknown[]): ReactNode[] {
   const out: ReactNode[] = [];
+  // "从此分支"入口只保留在会话最下面（最后一条消息）——
+  // 每条消息都出按钮干扰大且语义重复（Ryan 反馈）
+  let lastMessageIdx = -1;
+  for (let k = items.length - 1; k >= 0; k--) {
+    if ((items[k] as Record<string, unknown> | null)?.kind === "message") {
+      lastMessageIdx = k;
+      break;
+    }
+  }
   let i = 0;
   while (i < items.length) {
     const it = items[i] as Record<string, unknown> | null;
@@ -135,7 +144,7 @@ export function renderTimelineItems(items: readonly unknown[]): ReactNode[] {
       i = j;
       continue;
     }
-    out.push(renderSingleItem(it, i));
+    out.push(renderSingleItem(it, i, i === lastMessageIdx));
     i++;
   }
   return out;
@@ -234,10 +243,10 @@ function runSeconds(calls: SessionTranscriptToolCall[]): number {
   return Math.round((t1 - t0) / 1000);
 }
 
-function renderSingleItem(item: unknown, index: number): ReactNode {
+function renderSingleItem(item: unknown, index: number, isLastMessage = false): ReactNode {
   const it = item as Record<string, unknown> | null;
   const key = (typeof it?.id === "string" && it.id) || `item-${index}`;
-  if (it?.kind === "message") return <MessageView key={key} msg={it as unknown as SessionTranscriptMessage} />;
+  if (it?.kind === "message") return <MessageView key={key} msg={it as unknown as SessionTranscriptMessage} showBranchAction={isLastMessage} />;
   if (it?.kind === "tool") return <ToolCallView key={key} call={it as unknown as SessionTranscriptToolCall} />;
   if (it?.kind === "summary" || it?.kind === "activity") return <ActivityView key={key} item={it} />;
   return null;
@@ -272,7 +281,7 @@ function MessageImage({ src, alt }: { src: string; alt: string }) {
   );
 }
 
-function MessageView({ msg }: { msg: SessionTranscriptMessage }) {
+function MessageView({ msg, showBranchAction = false }: { msg: SessionTranscriptMessage; showBranchAction?: boolean }) {
   if (msg.role === "user") {
     return (
       <div className="msg user">
@@ -294,7 +303,7 @@ function MessageView({ msg }: { msg: SessionTranscriptMessage }) {
           </div>
         )}
         <SkillCommandText text={msg.text} />
-        <MessageActions messageId={msg.id} />
+        {showBranchAction && <MessageActions messageId={msg.id} />}
       </div>
     );
   }
@@ -312,7 +321,7 @@ function MessageView({ msg }: { msg: SessionTranscriptMessage }) {
       {msg.text ? (
         <>
           <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>{msg.text}</ReactMarkdown>
-          <MessageActions messageId={msg.id} />
+          {showBranchAction && <MessageActions messageId={msg.id} />}
         </>
       ) : (
         <div className="thinking"><span className="dot" /><span className="dot" /><span className="dot" /></div>

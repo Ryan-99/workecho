@@ -1,5 +1,5 @@
 import { useState, useEffect, memo } from "react";
-import { RefreshCw, Plus, ChevronUp, ChevronDown, X, Zap, BookOpen, FileText, Link2, TrendingUp, Share2 } from "lucide-react";
+import { RefreshCw, Plus, ChevronUp, ChevronDown, X, Zap, BookOpen, FileText, Link2, TrendingUp, Share2, MessageSquareHeart } from "lucide-react";
 import * as LucideIcons from "lucide-react";
 import type { DesktopAppState } from "../desktop-state";
 import { CardPicker } from "./CardPicker";
@@ -25,9 +25,10 @@ interface Props {
   sidebarCollapsed?: boolean;
   width?: number;
   onResize?: (e: React.MouseEvent) => void;
+  onFeedback?: () => void;
 }
 
-export function StatusPanel({ state, sidebarCollapsed, width, onResize }: Props) {
+export function StatusPanel({ state, sidebarCollapsed, width, onResize, onFeedback }: Props) {
   const [cards, setCards] = useState<CardConfig[]>([]);
   const [cardData, setCardData] = useState<Record<string, EntityData[]>>({});
   const [loading, setLoading] = useState(true);
@@ -152,6 +153,7 @@ export function StatusPanel({ state, sidebarCollapsed, width, onResize }: Props)
         </div>
       </div>
 
+      <div className="status-panel-body">
       {/* 固定卡片：Wiki 知识库概览（受 showWikiStatsCard 配置控制） */}
       {wikiStatsVisible && wikiStats && (
         <WikiStatsCard stats={wikiStats} />
@@ -182,6 +184,16 @@ export function StatusPanel({ state, sidebarCollapsed, width, onResize }: Props)
           <button className="btn-primary" onClick={() => setShowPicker(true)}><Plus size={13} /> 添加卡片</button>
         </div>
       )}
+
+      {onFeedback && (
+        <div className="status-panel-footer">
+          <button className="status-feedback-btn" onClick={onFeedback}>
+            <MessageSquareHeart size={13} /> 反馈
+          </button>
+        </div>
+      )}
+
+      </div>
 
       {showPicker && (
         <CardPicker

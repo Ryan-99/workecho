@@ -84,16 +84,30 @@ export function ChatPanel({ state, transcript, sending, showTerminal, onSend, on
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const items = transcript?.transcript ?? [];
 
+  // 切换会话：直接落到最新位置（无滑动动画）
+  const sessionId = state.selectedSessionId;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [sessionId, scrollRef]);
+
   // 计划模式状态跟随主进程（工作区隔离）
   useEffect(() => {
     window.piApp.getPlanMode().then(setPlanOn).catch(() => {});
   }, [state.selectedWorkspaceId]);
 
-  // 滚到底部（消息变化或终端开关时）
+  // 滚动跟随：流式输出（同一条消息的 delta 不改变 items.length）也要跟随最新内容；
+  // 用户上翻阅读时不强制拽底（距底 > 120px 视为在阅读），只在接近底部时 pin 住
+  const transcriptTick = transcript?.transcript?.length
+    ? `${items.length}:${transcript.transcript[transcript.transcript.length - 1]?.kind === "message" ? String((transcript.transcript[transcript.transcript.length - 1] as { text?: string }).text ?? "").length : 0}`
+    : "0";
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [items.length, showTerminal, scrollRef]);
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcriptTick, showTerminal, scrollRef]);
 
   // 自动调整高度（codex：min 24px，内容多了增高，封顶 220px）
   const autoResize = useCallback(() => {

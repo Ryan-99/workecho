@@ -213,6 +213,8 @@ jobs:
 
       - name: Package Windows directory
         run: pnpm --filter @workecho/desktop run package:win:dir
+        env:
+          WORKECHO_FEEDBACK_WEBHOOKS: ${{ secrets.WORKECHO_FEEDBACK_WEBHOOKS }}
 
       - name: Verify packaged runtime dependencies
         run: pnpm --dir apps/desktop run verify:packaged-runtime-deps:windows
