@@ -37,3 +37,7 @@ workecho-intro.html
 review/findings.md
 review/task_plan.md
 review/progress.md
+
+# 内部开发文档——仅本地保留，不上传
+review/
+WIKI-DESIGN.md
