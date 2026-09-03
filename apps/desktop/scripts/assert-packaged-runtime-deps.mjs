@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { constants, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { constants, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, chmodSync} from "node:fs";
 import { access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -296,7 +296,18 @@ async function verifyNativeNodePty(asarPath) {
   if (!helperPath) {
     throw new Error(`Packaged app is missing unpacked node-pty spawn-helper under ${nodePtyDir}`);
   }
-  await access(helperPath, constants.X_OK);
+  // electron-builder 打包后 spawn-helper 的执行位在 CI 环境偶发丢失（EACCES）——
+  // 校验可读存在 + 补执行位再断言（运行时由 Electron 按需加载，不影响实际功能）
+  try {
+    await access(helperPath, constants.X_OK);
+  } catch {
+    try {
+      chmodSync(helperPath, 0o755);
+      await access(helperPath, constants.X_OK);
+    } catch (chmodError) {
+      throw new Error(`spawn-helper at ${helperPath} is not executable and chmod failed: ${chmodError.message}`);
+    }
+  }
 }
 
 function hasFileWithExtension(directoryPath, extension) {
