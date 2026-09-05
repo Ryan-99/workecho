@@ -348,7 +348,7 @@ function CustomProviderRow({
   );
 }
 
-/** 行内新增自定义 provider（OpenAI 兼容）：ID / Base URL / API Key / 模型列表 */
+/** 行内新增自定义 provider（OpenAI 兼容）：ID / Base URL / API Key / 接口类型 / 模型列表 */
 function CustomProviderFormInline({
   wsId,
   existingIds,
@@ -362,6 +362,7 @@ function CustomProviderFormInline({
   const [providerId, setProviderId] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [apiType, setApiType] = useState<"openai-completions" | "openai-responses">("openai-completions");
   const [modelsText, setModelsText] = useState("");
   const [pending, setPending] = useState(false);
   const [probing, setProbing] = useState(false);
@@ -409,6 +410,7 @@ function CustomProviderFormInline({
         providerId: id,
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim() || undefined,
+        api: apiType,
         models: modelList.map((m) => ({ id: m })),
       });
       onSaved();
@@ -434,6 +436,12 @@ function CustomProviderFormInline({
         <button type="button" className="app-dialog__btn" onClick={handleProbe} disabled={probing || !baseUrl.trim()}>
           {probing ? <Loader size={12} className="spin" /> : null} 拉取模型列表
         </button>
+      </div>
+      <div className="provider-setup-key">
+        <select className="provider-setup-api-select" value={apiType} onChange={(e) => setApiType(e.target.value as "openai-completions" | "openai-responses")}>
+          <option value="openai-completions">Chat Completions（大多数端点）</option>
+          <option value="openai-responses">Responses（Echoly 等中转）</option>
+        </select>
       </div>
       <div className="provider-setup-key">
         <textarea

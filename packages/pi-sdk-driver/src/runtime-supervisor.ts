@@ -44,6 +44,7 @@ import {
 export {
   BUILT_IN_PROVIDER_IDS,
   CUSTOM_PROVIDER_ID_PATTERN,
+  CUSTOM_PROVIDER_APIS,
   isValidHttpBaseUrl,
   OPENAI_COMPLETIONS_API,
 } from "./custom-provider-store.js";

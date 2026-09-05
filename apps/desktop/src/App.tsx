@@ -287,10 +287,11 @@ export default function App() {
     applyState(s);
   }, []);
 
-  // 新建会话
-  const newSession = useCallback(async () => {
+  // 新建会话（返回新会话 id——侧栏分组用它把会话直接归入分组）
+  const newSession = useCallback(async (): Promise<string | undefined> => {
     const s = await window.piApp.createSession({ workspaceId: state?.selectedWorkspaceId ?? "" });
     applyState(s);
+    return s?.selectedSessionId || undefined;
   }, [state?.selectedWorkspaceId, applyState]);
 
   // 选择会话：立即切 UI（不等 IPC 队列），避免 agent streaming 时卡住
@@ -509,7 +510,7 @@ export default function App() {
             collapsed={state.sidebarCollapsed}
             workspaceId={state.selectedWorkspaceId}
             width={sidebarWidth}
-            onNewSession={() => { setShowSchedule(false); setShowWiki(false); newSession(); }}
+            onNewSession={() => { setShowSchedule(false); setShowWiki(false); return newSession(); }}
             onSelectSession={(id) => { setShowSchedule(false); setShowWiki(false); selectSession(id); }}
             onArchiveSession={archiveSession}
             onDeleteSession={deleteSession}

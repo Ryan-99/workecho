@@ -36,10 +36,14 @@ export interface CustomProviderModelConfig {
   readonly contextWindow?: number;
 }
 
+/** 对话 API 协议：openai-completions（默认）/ openai-responses（Echoly 等中转） */
+export type CustomProviderApi = "openai-completions" | "openai-responses";
+
 export interface CustomProviderConfig {
   readonly providerId: string;
   readonly baseUrl: string;
   readonly apiKey?: string;
+  readonly api?: CustomProviderApi;
   readonly models: readonly CustomProviderModelConfig[];
 }
 

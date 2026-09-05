@@ -2009,31 +2009,10 @@ app.whenReady().then(async () => {
     return searchWiki(ws.path, query, { limit: limit ?? 20 });
   });
 
-  // 彻底删除会话（删 jsonl 文件 + 从 catalog 移除）
+  // 彻底删除会话（归档 → 删 jsonl 文件 → reconcile 移除 catalog 条目；逻辑见 app-store-workspace）
   ipcMain.handle("workbench:delete-session-forever", async (_event, workspaceId: string, sessionId: string) => {
     try {
-      const st = store.state;
-      const ws = st.workspaces.find((w) => w.id === workspaceId);
-      if (!ws) return null;
-      // 先归档（从运行时移除 + catalog 移除）
-      await store.archiveSession({ workspaceId, sessionId } as any);
-      // 在 pi sessions 目录里找包含 sessionId 的 jsonl 文件并删除
-      const agentDir = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".pi", "agent", "sessions");
-      if (existsSync(agentDir)) {
-        for (const dir of readdirSync(agentDir)) {
-          const sessionDir = path.join(agentDir, dir);
-          if (!existsSync(sessionDir)) continue;
-          for (const file of readdirSync(sessionDir)) {
-            // 精确匹配：文件主名（首个 . 前）必须等于 sessionId，防止
-            // 子串碰撞误删其他会话文件（安全审核 F-36）
-            if (file.split(".")[0] === sessionId) {
-              try { unlinkSync(path.join(sessionDir, file)); } catch {}
-              console.log(`[delete-forever] 已删除: ${file}`);
-            }
-          }
-        }
-      }
-      return store.state;
+      return await store.deleteSessionForever({ workspaceId, sessionId });
     } catch (e) {
       console.warn("[delete-forever] 失败:", (e as Error).message);
       return null;

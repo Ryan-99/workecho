@@ -1,4 +1,4 @@
-import { Sun, Moon, Monitor, Plus, Trash2, KeyRound, LogIn, LogOut, Check, Loader, Palette, Cloud, FileText, Puzzle, Info, Cpu, Zap, BookOpen, Clock, Sparkles, Plug, Terminal, X, Webhook, Upload, Activity } from "lucide-react";
+import { Sun, Moon, Monitor, Plus, Trash2, KeyRound, LogIn, LogOut, Check, Loader, Palette, Cloud, FileText, Puzzle, Info, Cpu, Zap, BookOpen, Clock, Sparkles, Plug, Terminal, X, Webhook, Upload, Activity, Pencil } from "lucide-react";
 
 export const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; icon: React.ReactNode }> = [
   { id: "appearance", label: "外观", icon: <Palette size={14} /> },
@@ -260,10 +260,11 @@ function ApiKeyProviderRow({ provider, wsId }: { provider: RuntimeProviderRecord
   );
 }
 
-/* ============ 自定义 Provider（Echoly relay 类型） ============ */
+/* ============ 自定义 Provider（OpenAI 兼容端点 / 中转） ============ */
 function CustomProvidersSection({ wsId, existingIds }: { wsId: string; existingIds: readonly string[] }) {
   const [customs, setCustoms] = useState<CustomProviderConfig[]>([]);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<CustomProviderConfig | null>(null);
 
   const loadCustoms = async () => {
     // costrict 由上方"直接登录"一键管理，不在手动列表中重复展示
@@ -283,14 +284,26 @@ function CustomProvidersSection({ wsId, existingIds }: { wsId: string; existingI
         <div key={c.providerId} className="provider-row">
           <div className="provider-info">
             <span className="provider-name">{c.providerId}</span>
-            <span className="hint">{c.baseUrl} · {c.models.length} 个模型</span>
+            <span className="hint">
+              {c.baseUrl} · {c.models.length} 个模型 · {c.api === "openai-responses" ? "Responses API" : "Completions API"}
+            </span>
           </div>
           <div className="provider-actions">
+            <button className="btn-ghost" onClick={() => { setAdding(false); setEditing(c); }}><Pencil size={12} /> 编辑</button>
             <button className="btn-ghost danger" onClick={() => handleDelete(c.providerId)}><Trash2 size={12} /> 删除</button>
           </div>
         </div>
       ))}
-      {adding ? (
+      {editing ? (
+        <CustomProviderForm
+          wsId={wsId}
+          existingIds={existingIds}
+          customs={customs.map((c) => c.providerId)}
+          initial={editing}
+          onSaved={() => { setEditing(null); loadCustoms(); }}
+          onCancel={() => setEditing(null)}
+        />
+      ) : adding ? (
         <CustomProviderForm
           wsId={wsId}
           existingIds={existingIds}
@@ -305,17 +318,21 @@ function CustomProvidersSection({ wsId, existingIds }: { wsId: string; existingI
   );
 }
 
-function CustomProviderForm({ wsId, existingIds, customs, onSaved, onCancel }: {
+function CustomProviderForm({ wsId, existingIds, customs, initial, onSaved, onCancel }: {
   wsId: string;
   existingIds: readonly string[];
   customs: readonly string[];
+  /** 编辑模式：带出原配置（providerId 锁定、留空的 API Key 保持不变） */
+  initial?: CustomProviderConfig;
   onSaved: () => void;
   onCancel: () => void;
 }) {
-  const [providerId, setProviderId] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [models, setModels] = useState("");
+  const isEdit = Boolean(initial);
+  const [providerId, setProviderId] = useState(initial?.providerId ?? "");
+  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
+  const [apiKey, setApiKey] = useState(initial?.apiKey ?? "");
+  const [api, setApi] = useState<"openai-completions" | "openai-responses">(initial?.api ?? "openai-completions");
+  const [models, setModels] = useState((initial?.models ?? []).map((m) => m.id).join("\n"));
   const [pending, setPending] = useState(false);
   const [probing, setProbing] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -339,17 +356,20 @@ function CustomProviderForm({ wsId, existingIds, customs, onSaved, onCancel }: {
     setError(undefined);
     const id = providerId.trim();
     if (!id) { setError("Provider ID 不能为空"); return; }
-    if (allIds.has(id)) { setError(`Provider ID "${id}" 已存在`); return; }
+    if (!isEdit && allIds.has(id)) { setError(`Provider ID "${id}" 已存在`); return; }
     if (!baseUrl.trim()) { setError("Base URL 不能为空"); return; }
     const modelList = models.split("\n").map((m) => m.trim()).filter(Boolean);
     if (modelList.length === 0) { setError("至少配置一个模型"); return; }
 
     setPending(true);
     try {
+      // 编辑时留空 = 沿用原 key（setCustomProvider 全量覆写，不能把 key 抹掉）
+      const resolvedKey = apiKey.trim() || (isEdit ? initial?.apiKey : undefined);
       await window.piApp.setCustomProvider(wsId, {
         providerId: id,
         baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim() || undefined,
+        apiKey: resolvedKey || undefined,
+        api,
         models: modelList.map((m) => ({ id: m })),
       });
       onSaved();
@@ -361,7 +381,7 @@ function CustomProviderForm({ wsId, existingIds, customs, onSaved, onCancel }: {
     <div className="custom-provider-form">
       <div className="form-row">
         <label>Provider ID</label>
-        <input value={providerId} onChange={(e) => setProviderId(e.target.value)} placeholder="例如：echoly、my-openai" />
+        <input value={providerId} onChange={(e) => setProviderId(e.target.value)} placeholder="例如：echoly、my-openai" disabled={isEdit} />
       </div>
       <div className="form-row">
         <label>Base URL</label>
@@ -369,7 +389,14 @@ function CustomProviderForm({ wsId, existingIds, customs, onSaved, onCancel }: {
       </div>
       <div className="form-row">
         <label>API Key</label>
-        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." />
+        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={isEdit && initial?.apiKey ? "留空保持不变" : "sk-..."} />
+      </div>
+      <div className="form-row">
+        <label>接口类型</label>
+        <select value={api} onChange={(e) => setApi(e.target.value as "openai-completions" | "openai-responses")}>
+          <option value="openai-completions">Chat Completions（大多数 OpenAI 兼容端点）</option>
+          <option value="openai-responses">Responses（Echoly 等中转 / 新式端点）</option>
+        </select>
       </div>
       <div className="form-row">
         <label>模型（每行一个）</label>
@@ -379,11 +406,11 @@ function CustomProviderForm({ wsId, existingIds, customs, onSaved, onCancel }: {
         <button className="btn-ghost" onClick={handleProbe} disabled={probing || !baseUrl.trim()}>
           {probing ? <Loader size={12} className="spin" /> : null} 拉取模型列表
         </button>
-        <button className="btn-primary" onClick={handleSave} disabled={pending}>保存</button>
+        <button className="btn-primary" onClick={handleSave} disabled={pending}>{isEdit ? "保存修改" : "保存"}</button>
         <button className="btn-ghost" onClick={onCancel}>取消</button>
       </div>
       {error && <div className="provider-error">{error}</div>}
-      <div className="form-note">注意：自定义 provider 默认用 openai-completions API。如果需要 openai-responses（如 Echoly relay），请手动编辑配置目录下的 ~/.pi/agent/models.json。</div>
+      <div className="form-note">接口类型按端点实际支持的协议选：对话报 404/400 且提示 Unknown request URL 时，换另一种再试。对话协议不匹配是"配置了 provider 却报 provider 有问题"的最常见原因。</div>
     </div>
   );
 }
@@ -943,21 +970,6 @@ function HooksSettingsSection() {
 function AboutSection() {
   const [checking, setChecking] = useState(false);
   const [updateResult, setUpdateResult] = useState<string | undefined>();
-  const [webhook, setWebhook] = useState("");
-  const [webhookSaved, setWebhookSaved] = useState(false);
-
-  useEffect(() => {
-    window.piApp.getFeedbackWebhook().then(setWebhook).catch(() => {});
-  }, []);
-
-  const saveWebhook = async () => {
-    try {
-      await window.piApp.setFeedbackWebhook(webhook);
-      setWebhookSaved(true);
-      setTimeout(() => setWebhookSaved(false), 1500);
-    } catch { /* ignore */ }
-  };
-
   const handleCheck = async () => {
     setChecking(true);
     setUpdateResult(undefined);
@@ -983,19 +995,6 @@ function AboutSection() {
   return (
     <section className="settings-section">
       <h2>关于</h2>
-      <div className="settings-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
-        <label>反馈通道覆盖（维护者用，普通用户无需理会）</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            value={webhook}
-            onChange={(e) => setWebhook(e.target.value)}
-            placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…"
-            style={{ flex: 1, minWidth: 0 }}
-          />
-          <button className="btn-primary" onClick={() => { void saveWebhook(); }}>{webhookSaved ? "已保存" : "保存"}</button>
-        </div>
-        <span className="hint">在企业微信群添加"机器人"后复制 Webhook 地址填到这里；用户点侧栏"反馈"即直达到群。默认通道已内置随包分发，留空即用内置；仅维护者排障时覆盖。</span>
-      </div>
       <div className="settings-row"><label>版本</label><span className="hint">Workecho</span></div>
       <div className="settings-row"><label>平台</label><span className="hint">{window.piApp.platform}</span></div>
       <div className="settings-row" style={{ paddingTop: 12 }}>

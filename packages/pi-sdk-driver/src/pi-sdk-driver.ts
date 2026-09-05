@@ -48,6 +48,11 @@ export class PiSdkDriver implements SessionDriver {
     this.runtimeSupervisor = new RuntimeSupervisor(options);
   }
 
+  /** pi agent 配置目录（尊重 PI_CODING_AGENT_DIR 覆盖）——删除会话文件等需要落盘的场景用 */
+  async getAgentDir(): Promise<string> {
+    return (await this.depsPromise).agentDir;
+  }
+
   createSession(workspace: WorkspaceRef, options?: CreateSessionOptions): Promise<SessionSnapshot> {
     return this.supervisor.createSession(workspace, options);
   }

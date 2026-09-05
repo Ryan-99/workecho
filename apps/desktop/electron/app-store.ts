@@ -473,6 +473,10 @@ export class DesktopAppStore implements AppStoreInternals {
     return workspace.unarchiveSession(this, target);
   }
 
+  async deleteSessionForever(target: WorkspaceSessionTarget): Promise<DesktopAppState | null> {
+    return workspace.deleteSessionForever(this, target);
+  }
+
   async markSessionRead(target: WorkspaceSessionTarget): Promise<DesktopAppState> {
     await this.initialize();
     const sessionRef = toSessionRef(target);
@@ -919,6 +923,7 @@ export class DesktopAppStore implements AppStoreInternals {
       providerId: entry.providerId,
       baseUrl: entry.baseUrl,
       ...(entry.apiKey !== undefined ? { apiKey: entry.apiKey } : {}),
+      ...(entry.api !== undefined ? { api: entry.api } : {}),
       models: entry.models.map((model) => ({
         id: model.id,
         ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
@@ -932,6 +937,7 @@ export class DesktopAppStore implements AppStoreInternals {
         providerId: config.providerId,
         baseUrl: config.baseUrl,
         ...(config.apiKey !== undefined ? { apiKey: config.apiKey } : {}),
+        ...(config.api !== undefined ? { api: config.api } : {}),
         models: config.models.map((model) => ({
           id: model.id,
           ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),

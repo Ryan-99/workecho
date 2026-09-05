@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { appConfirm } from "./app-dialog";
 import {
   Plus, Trash2, Archive, Settings as SettingsIcon, Pin,
@@ -24,7 +24,8 @@ interface Props {
   archivedCount: number;
   workspaceId: string;
   width: number;
-  onNewSession: () => void;
+  /** 返回新建会话的 id（供组内新建时归入分组） */
+  onNewSession: () => Promise<string | undefined>;
   onSelectSession: (id: string) => void;
   onArchiveSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
@@ -35,6 +36,7 @@ interface Props {
 
 const UNCATEGORIZED = "__uncategorized__";
 const COLLAPSE_KEY = "sidebar-collapsed-groups";
+const DRAG_MIME = "application/x-workecho-session";
 
 export function Sidebar({
   sessions, orchestrationChildren = [], activeSessionId, collapsed, archivedCount, workspaceId, width,
@@ -46,6 +48,7 @@ export function Sidebar({
   const [contextMenu, setContextMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
+  const [dragSessionId, setDragSessionId] = useState<string | null>(null);
   const api = window as any;
 
   // 加载分组配置
@@ -104,6 +107,21 @@ export function Sidebar({
       if (updated) setGroupsConfig(updated);
     } catch { /* ignore */ }
     setContextMenu(null);
+  };
+
+  /** 组内新建：建会话后立刻归入该分组（分组是 client-side overlay，分配走独立 IPC） */
+  const handleNewInGroup = async (gid: string | null) => {
+    const sid = await onNewSession();
+    if (sid) await handleAssign(sid, gid);
+  };
+
+  /** 拖拽落点：把会话移入目标分组（未分类 = 移出分组） */
+  const handleDropOnGroup = (e: React.DragEvent, gid: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const sid = e.dataTransfer.getData(DRAG_MIME) || dragSessionId;
+    setDragSessionId(null);
+    if (sid) void handleAssign(sid, gid);
   };
 
   // 子线程父子映射（orchestration）：子会话嵌在父会话下展示，不再平铺
@@ -198,9 +216,13 @@ export function Sidebar({
             isCollapsed={collapsedGroups.has(g.id)}
             onToggle={() => toggleGroup(g.id)}
             onRemove={() => handleRemoveGroup(g.id)}
+            onNewInGroup={() => void handleNewInGroup(g.id)}
+            onDropOnGroup={handleDropOnGroup}
             onSelect={onSelectSession}
             onArchive={onArchiveSession}
             onDelete={onDeleteSession}
+            onDragStartSession={(sid) => setDragSessionId(sid)}
+            onDragEndSession={() => setDragSessionId(null)}
             onContextMenu={(e, sid) => {
               e.preventDefault();
               setContextMenu({ sessionId: sid, x: e.clientX, y: e.clientY });
@@ -219,9 +241,13 @@ export function Sidebar({
             isCollapsed={collapsedGroups.has(UNCATEGORIZED)}
             onToggle={() => toggleGroup(UNCATEGORIZED)}
             onRemove={() => {}}
+            onNewInGroup={() => void handleNewInGroup(null)}
+            onDropOnGroup={handleDropOnGroup}
             onSelect={onSelectSession}
             onArchive={onArchiveSession}
             onDelete={onDeleteSession}
+            onDragStartSession={(sid) => setDragSessionId(sid)}
+            onDragEndSession={() => setDragSessionId(null)}
             onContextMenu={(e, sid) => {
               e.preventDefault();
               setContextMenu({ sessionId: sid, x: e.clientX, y: e.clientY });
@@ -268,10 +294,11 @@ export function Sidebar({
   );
 }
 
-/** 单个分组区块 */
+/** 单个分组区块（可作拖拽落点；标题行带组内新建按钮） */
 function SessionGroupSection({
   group, sessions, childrenByParent, activeSessionId, workspaceId,
-  isCollapsed, onToggle, onRemove, onSelect, onArchive, onDelete, onContextMenu, isUncategorized,
+  isCollapsed, onToggle, onRemove, onNewInGroup, onDropOnGroup, onSelect, onArchive, onDelete,
+  onDragStartSession, onDragEndSession, onContextMenu, isUncategorized,
 }: {
   group: SessionGroup;
   sessions: SessionRecord[];
@@ -281,18 +308,48 @@ function SessionGroupSection({
   isCollapsed: boolean;
   onToggle: () => void;
   onRemove: () => void;
+  onNewInGroup: () => void;
+  onDropOnGroup: (e: React.DragEvent, gid: string | null) => void;
   onSelect: (id: string) => void;
   onArchive: (id: string) => void;
   onDelete: (id: string) => void;
+  onDragStartSession: (sessionId: string) => void;
+  onDragEndSession: () => void;
   onContextMenu: (e: React.MouseEvent, sessionId: string) => void;
   isUncategorized?: boolean;
 }) {
+  const [isDropTarget, setIsDropTarget] = useState(false);
+  // 拖拽悬停到折叠分组上时自动展开，便于直接落入
+  const expandOnce = useRef(false);
+  const targetGid = isUncategorized ? null : group.id;
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setIsDropTarget(true);
+    if (isCollapsed && !expandOnce.current) {
+      expandOnce.current = true;
+      onToggle();
+    }
+  };
+
   return (
-    <div className={`session-group ${isCollapsed ? "collapsed" : ""}`}>
+    <div
+      className={`session-group ${isCollapsed ? "collapsed" : ""} ${isDropTarget ? "drop-target" : ""}`}
+      onDragOver={handleDragOver}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDropTarget(false); }}
+      onDrop={(e) => { setIsDropTarget(false); expandOnce.current = false; onDropOnGroup(e, targetGid); }}
+    >
       <div className="session-group-header" onClick={onToggle}>
         {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
         <span className="session-group-name">{group.name}</span>
         <span className="session-group-count">{sessions.length}</span>
+        <button
+          className="session-group-new"
+          title="在此分组新建会话"
+          onClick={(e) => { e.stopPropagation(); onNewInGroup(); }}
+        ><Plus size={11} /></button>
         {!isUncategorized && (
           <button
             className="session-group-del"
@@ -315,6 +372,8 @@ function SessionGroupSection({
               onArchive={onArchive}
               onDelete={onDelete}
               onContextMenu={onContextMenu}
+              onDragStart={onDragStartSession}
+              onDragEnd={onDragEndSession}
             />
           ))}
         </div>
@@ -332,9 +391,9 @@ const CHILD_STATUS_LABEL: Record<string, string> = {
   failed: "失败",
 };
 
-/** 单条 session（含嵌套的 orchestration 子线程） */
+/** 单条 session（含嵌套的 orchestration 子线程；可拖拽到分组） */
 function SessionItemRow({
-  session: s, childThreads = [], isActive, activeSessionId, workspaceId, onSelect, onArchive, onDelete, onContextMenu,
+  session: s, childThreads = [], isActive, activeSessionId, workspaceId, onSelect, onArchive, onDelete, onContextMenu, onDragStart, onDragEnd,
 }: {
   session: SessionRecord;
   childThreads?: readonly OrchestrationChildThread[];
@@ -345,9 +404,20 @@ function SessionItemRow({
   onArchive: (id: string) => void;
   onDelete: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, sessionId: string) => void;
+  onDragStart: (sessionId: string) => void;
+  onDragEnd: () => void;
 }) {
   return (
-    <div className={`session-item-wrap ${isActive ? "active" : ""}`}>
+    <div
+      className={`session-item-wrap ${isActive ? "active" : ""}`}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(DRAG_MIME, s.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart(s.id);
+      }}
+      onDragEnd={onDragEnd}
+    >
     <div
       className={`session-item ${isActive ? "active" : ""}`}
       onClick={() => onSelect(s.id)}

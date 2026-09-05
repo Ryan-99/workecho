@@ -4,6 +4,8 @@ import {
   BUILT_IN_PROVIDER_IDS,
   CUSTOM_PROVIDER_ID_PATTERN,
   CUSTOM_PROVIDER_PLACEHOLDER_API_KEY,
+  CUSTOM_PROVIDER_APIS,
+  type CustomProviderApi,
   isValidHttpBaseUrl,
   OPENAI_COMPLETIONS_API,
   PI_GUI_CUSTOM_PROVIDER_MARKER,
@@ -16,11 +18,19 @@ export type { CustomProviderEntry, CustomProviderInput, CustomProviderModelInput
 export {
   BUILT_IN_PROVIDER_IDS,
   CUSTOM_PROVIDER_ID_PATTERN,
+  CUSTOM_PROVIDER_APIS,
   CUSTOM_PROVIDER_PLACEHOLDER_API_KEY,
   isValidHttpBaseUrl,
   OPENAI_COMPLETIONS_API,
   PI_GUI_CUSTOM_PROVIDER_MARKER,
 } from "./custom-provider-types.js";
+
+/** 归一化 api 字段：缺省/未知值回落 openai-completions（保持向后兼容） */
+function normalizeApi(raw: unknown): CustomProviderApi {
+  return CUSTOM_PROVIDER_APIS.includes(raw as CustomProviderApi)
+    ? (raw as CustomProviderApi)
+    : OPENAI_COMPLETIONS_API;
+}
 
 export class CustomProviderStore {
   private queue: Promise<unknown> = Promise.resolve();
@@ -40,12 +50,22 @@ export class CustomProviderStore {
       const data = await readModelsJson(this.modelsJsonPath);
       const providers = ensureProvidersRecord(data);
       const existing = providers[input.providerId];
-      if (existing && typeof existing === "object" && !isPiGuiCustomProviderConfig(input.providerId, existing as Record<string, unknown>)) {
+      if (
+        existing &&
+        typeof existing === "object" &&
+        !isManageableCustomProviderConfig(input.providerId, existing as Record<string, unknown>)
+      ) {
         throw new Error(
           `Provider ID "${input.providerId}" already exists in models.json and is not managed by pi-gui.`,
         );
       }
-      providers[input.providerId] = toProviderConfig(input);
+      // 保留现有其它字段（compat 等），只覆盖 pi-gui 管理的字段
+      const previous =
+        existing && typeof existing === "object" ? (existing as Record<string, unknown>) : undefined;
+      providers[input.providerId] = {
+        ...previous,
+        ...toProviderConfig(input),
+      };
       await atomicWriteJson(this.modelsJsonPath, data);
     });
   }
@@ -83,6 +103,9 @@ function validateInput(input: CustomProviderInput): void {
   if (!isValidHttpBaseUrl(input.baseUrl)) {
     throw new Error(`Base URL must start with http:// or https://: ${JSON.stringify(input.baseUrl)}`);
   }
+  if (input.api !== undefined && !CUSTOM_PROVIDER_APIS.includes(input.api)) {
+    throw new Error(`Unsupported api: ${JSON.stringify(input.api)}. Use one of ${CUSTOM_PROVIDER_APIS.join(", ")}.`);
+  }
   if (input.models.length === 0) {
     throw new Error("At least one model is required.");
   }
@@ -100,7 +123,7 @@ function toProviderConfig(input: CustomProviderInput): Record<string, unknown> {
   const trimmedKey = input.apiKey?.trim();
   return {
     baseUrl: input.baseUrl,
-    api: OPENAI_COMPLETIONS_API,
+    api: input.api ?? OPENAI_COMPLETIONS_API,
     apiKey: trimmedKey ? trimmedKey : CUSTOM_PROVIDER_PLACEHOLDER_API_KEY,
     [PI_GUI_CUSTOM_PROVIDER_MARKER]: true,
     models: input.models.map((model) => {
@@ -155,6 +178,7 @@ function readCustomProviders(data: Record<string, unknown>): readonly CustomProv
       providerId,
       baseUrl,
       ...(apiKey !== undefined ? { apiKey } : {}),
+      ...(config.api !== undefined ? { api: normalizeApi(config.api) } : {}),
       models,
     });
   }
@@ -170,11 +194,21 @@ function isPiGuiCustomProviderConfig(providerId: string, config: Record<string, 
     return false;
   }
   return (
-    config.api === OPENAI_COMPLETIONS_API &&
     typeof config.baseUrl === "string" &&
     Array.isArray(config.models) &&
-    config.models.length > 0
+    config.models.length > 0 &&
+    // 带 npm/oauth 的条目属于 pi 生态管理（扩展 provider），不当作自定义端点
+    config.npm === undefined &&
+    config.oauth === undefined
   );
+}
+
+/**
+ * set() 的覆盖守卫：pi-gui 标记的条目、或"形状就是 OpenAI 兼容自定义端点"
+ * （baseUrl + models，无 npm/oauth）的条目（包括用户按旧提示手改过 api 的）都允许改写。
+ */
+function isManageableCustomProviderConfig(providerId: string, config: Record<string, unknown>): boolean {
+  return isPiGuiCustomProviderConfig(providerId, config);
 }
 
 function ensureProvidersRecord(data: Record<string, unknown>): Record<string, unknown> {

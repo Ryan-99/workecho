@@ -1,3 +1,5 @@
+import { existsSync, readdirSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { sessionKey } from "@pi-gui/pi-sdk-driver";
 import type { CreateSessionInput, DesktopAppState, WorkspaceSessionTarget } from "../src/desktop-state";
 import { toSessionRef } from "./app-store-utils";
@@ -232,6 +234,54 @@ export async function unarchiveSession(
       activeView: "threads",
     });
   });
+}
+
+/**
+ * 彻底删除会话：归档（转移选中）→ 删 jsonl 落盘文件 → reconcile 让 catalog
+ * 移除条目并释放内存 record → 刷新状态。
+ *
+ * pi 的会话文件命名为 `<timestamp>_<sessionId>.jsonl`（见 pi SessionManager），
+ * 匹配必须用"_<sessionId>"后缀——历史上用 `文件主名 === sessionId` 精确匹配，
+ * 永远匹配不上，表现为归档列表里点删除无反应。
+ */
+export async function deleteSessionForever(
+  store: AppStoreInternals,
+  target: WorkspaceSessionTarget,
+): Promise<DesktopAppState | null> {
+  await store.initialize();
+  const workspace = store.state.workspaces.find((w) => w.id === target.workspaceId);
+  if (!workspace) {
+    return null;
+  }
+
+  try {
+    // 1) 归档（含 pinned 清理与选中转移），确保没有运行中的引用挂在原会话上
+    await archiveSession(store, target);
+
+    // 2) 删除 <agentDir>/sessions/**/<timestamp>_<sessionId>.jsonl
+    const sessionsDir = join(await store.driver.getAgentDir(), "sessions");
+    if (existsSync(sessionsDir)) {
+      const suffix = `_${target.sessionId}.jsonl`;
+      for (const dir of readdirSync(sessionsDir, { withFileTypes: true })) {
+        if (!dir.isDirectory()) continue;
+        const sessionDirPath = join(sessionsDir, dir.name);
+        for (const file of readdirSync(sessionDirPath)) {
+          // 后缀精确匹配（sessionId 为 UUIDv7，不含下划线，不会误撞其他会话）
+          if (file.endsWith(suffix)) {
+            try { unlinkSync(join(sessionDirPath, file)); } catch { /* 单文件失败不阻断 */ }
+          }
+        }
+      }
+    }
+
+    // 3) 重新扫描磁盘 reconcile catalog：文件已删 → 条目移除、内存 record 释放
+    await store.driver.reconcileWorkspace(target.workspaceId);
+    await store.refreshState({ persistState: false, clearLastError: true });
+    return store.state;
+  } catch (error) {
+    console.warn("[delete-forever] 失败:", error);
+    return null;
+  }
 }
 
 export async function createSession(store: AppStoreInternals, input: CreateSessionInput): Promise<DesktopAppState> {

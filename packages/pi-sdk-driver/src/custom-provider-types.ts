@@ -3,10 +3,16 @@ export interface CustomProviderModelInput {
   readonly contextWindow?: number;
 }
 
+/** 对话 API 协议：绝大多数 OpenAI 兼容端点用 completions；Echoly 等中转用 responses */
+export const CUSTOM_PROVIDER_APIS = ["openai-completions", "openai-responses"] as const;
+export type CustomProviderApi = (typeof CUSTOM_PROVIDER_APIS)[number];
+
 export interface CustomProviderInput {
   readonly providerId: string;
   readonly baseUrl: string;
   readonly apiKey?: string;
+  /** 缺省 openai-completions */
+  readonly api?: CustomProviderApi;
   readonly models: readonly CustomProviderModelInput[];
 }
 
@@ -14,6 +20,7 @@ export interface CustomProviderEntry {
   readonly providerId: string;
   readonly baseUrl: string;
   readonly apiKey?: string;
+  readonly api?: CustomProviderApi;
   readonly models: readonly CustomProviderModelInput[];
 }
 
