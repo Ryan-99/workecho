@@ -31,7 +31,10 @@ export function ContextMeterIcon({ state }: { state: DesktopAppState }) {
   }, [state.selectedSessionId, state.revision]);
 
   const pct = usage?.percent ?? 0;
-  const color = pct > 85 ? "#c08b8b" : pct > 70 ? "#c4a97a" : "#8baab0";
+  const isDark = document.documentElement.classList.contains("dark");
+  const color = isDark
+    ? pct > 85 ? "#d4908a" : pct > 70 ? "#d0b070" : "#88aab0"
+    : pct > 85 ? "#c08b8b" : pct > 70 ? "#c4a97a" : "#8baab0";
 
   // 圆环（与原版一致）
   const radius = 6;
@@ -39,12 +42,19 @@ export function ContextMeterIcon({ state }: { state: DesktopAppState }) {
   const dashOffset = circumference - (Math.max(2, Math.min(pct, 100)) / 100) * circumference;
 
   // 分段（莫兰迪色）
-  const SEG_STYLE: Record<string, { color: string; label: string }> = {
-    system: { color: "#a8b8a0", label: "系统提示词" },
-    tools: { color: "#b3a8bd", label: "工具定义" },
-    messages: { color: "#8baab0", label: "对话内容" },
-    free: { color: "var(--bg-muted)", label: "剩余空间" },
-  };
+  const SEG_STYLE: Record<string, { color: string; label: string }> = isDark
+    ? {
+        system: { color: "#8a9a7a", label: "系统提示词" },
+        tools: { color: "#9a8aaa", label: "工具定义" },
+        messages: { color: "#7a9aa0", label: "对话内容" },
+        free: { color: "var(--bg-muted)", label: "剩余空间" },
+      }
+    : {
+        system: { color: "#a8b8a0", label: "系统提示词" },
+        tools: { color: "#b3a8bd", label: "工具定义" },
+        messages: { color: "#8baab0", label: "对话内容" },
+        free: { color: "var(--bg-muted)", label: "剩余空间" },
+      };
   const window_ = usage?.contextWindow ?? 1;
   const segs = (usage?.segments ?? []).filter((sg) => sg.tokens > 0);
 

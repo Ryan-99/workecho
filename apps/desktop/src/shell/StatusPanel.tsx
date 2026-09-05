@@ -153,7 +153,6 @@ export function StatusPanel({ state, sidebarCollapsed, width, onResize, onFeedba
         </div>
       </div>
 
-      <div className="status-panel-body">
       {/* 固定卡片：Wiki 知识库概览（受 showWikiStatsCard 配置控制） */}
       {wikiStatsVisible && wikiStats && (
         <WikiStatsCard stats={wikiStats} />
@@ -185,16 +184,6 @@ export function StatusPanel({ state, sidebarCollapsed, width, onResize, onFeedba
         </div>
       )}
 
-      {onFeedback && (
-        <div className="status-panel-footer">
-          <button className="status-feedback-btn" onClick={onFeedback}>
-            <MessageSquareHeart size={13} /> 反馈
-          </button>
-        </div>
-      )}
-
-      </div>
-
       {showPicker && (
         <CardPicker
           existingIds={cards.map((c) => c.id)}
@@ -202,6 +191,13 @@ export function StatusPanel({ state, sidebarCollapsed, width, onResize, onFeedba
           onCreateViaAI={handleCreateViaAI}
           onClose={() => setShowPicker(false)}
         />
+      )}
+      {onFeedback && (
+        <div className="status-panel-footer">
+          <button className="status-feedback-btn" onClick={onFeedback}>
+            <MessageSquareHeart size={13} /> 反馈
+          </button>
+        </div>
       )}
     </aside>
   );
@@ -264,7 +260,10 @@ function WikiGraphCard({ graph }: {
       pos.set(n.id, { x: cx + Math.cos(na) * spread, y: cy + Math.sin(na) * spread });
     });
   });
-  const CAT_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#84cc16", "#f97316"];
+  const isDark = document.documentElement.classList.contains("dark");
+  const CAT_COLORS = isDark
+    ? ["#5a8ac0", "#4a9a6a", "#c09040", "#8a6aa0", "#c05a5a", "#4a90a0", "#6a9a3a", "#c07030"]
+    : ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#84cc16", "#f97316"];
   const catColor = new Map(cats.map((c, i) => [c, CAT_COLORS[i % CAT_COLORS.length]!]));
   return (
     <div className="status-card wiki-graph-card">
