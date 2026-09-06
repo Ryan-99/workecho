@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   createSessionIpc,
+  desktopShortcut,
   launchDesktop,
   makeUserDataDir,
   makeWorkspace,
@@ -51,7 +52,8 @@ test("REPRO: paste a clipboard image (screenshot path) into the composer", async
 
     // 复现焦点丢失场景：粘贴前焦点移出输入框（点 body）
     await window.evaluate(() => { (document.activeElement as HTMLElement | null)?.blur(); document.body.focus(); });
-    await window.keyboard.press("Control+V");
+    // macOS 粘贴是 Meta+V（CI desktop-core 跑在 macOS runner，写死 Ctrl+V 曾致整 spec 红）
+    await window.keyboard.press(desktopShortcut("V"));
     await window.waitForTimeout(1500);
 
     const pasteLog = await window.evaluate(() => (window as unknown as { __pasteLog?: string[] }).__pasteLog ?? ["NO PASTE EVENT"]);

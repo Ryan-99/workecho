@@ -149,15 +149,15 @@ verify_deb_archive() {
   done
 
   local contents="$proof_dir/dpkg-contents.txt"
-  assert_contents "$contents" '\./opt/workecho/workecho$' "application executable"
-  assert_contents "$contents" '\./opt/workecho/chrome-sandbox$' "Chrome sandbox"
-  assert_contents "$contents" '\./opt/workecho/resources/app\.asar$' "app.asar"
-  assert_contents "$contents" '\./opt/workecho/resources/apparmor-profile$' "AppArmor profile"
+  assert_contents "$contents" '\./opt/Workecho/workecho$' "application executable"
+  assert_contents "$contents" '\./opt/Workecho/chrome-sandbox$' "Chrome sandbox"
+  assert_contents "$contents" '\./opt/Workecho/resources/app\.asar$' "app.asar"
+  assert_contents "$contents" '\./opt/Workecho/resources/apparmor-profile$' "AppArmor profile"
   assert_contents "$contents" '\./usr/share/applications/workecho\.desktop$' "desktop entry"
   assert_contents "$contents" '\./usr/share/icons/hicolor/[0-9]+x[0-9]+/apps/workecho\.png$' "desktop icon"
   assert_contents \
     "$contents" \
-    '\./opt/workecho/resources/app\.asar\.unpacked/node_modules/(\.pnpm/[^/]+/node_modules/)?node-pty/(build/Release|prebuilds/linux-x64)/pty\.node$' \
+    '\./opt/Workecho/resources/app\.asar\.unpacked/node_modules/(\.pnpm/[^/]+/node_modules/)?node-pty/(build/Release|prebuilds/linux-x64)/pty\.node$' \
     "native node-pty module"
 
   local control_dir="$temporary_root/control"
@@ -174,11 +174,11 @@ verify_deb_archive() {
       exit 1
     fi
   done
-  grep -F "update-alternatives --install '/usr/bin/workecho' 'workecho' '/opt/workecho/workecho' 100" "$postinst"
-  grep -F "chmod 4755 '/opt/workecho/chrome-sandbox'" "$postinst"
-  grep -F "chmod 0755 '/opt/workecho/chrome-sandbox'" "$postinst"
+  grep -F "update-alternatives --install '/usr/bin/workecho' 'workecho' '/opt/Workecho/workecho' 100" "$postinst"
+  grep -F "chmod 4755 '/opt/Workecho/chrome-sandbox'" "$postinst"
+  grep -F "chmod 0755 '/opt/Workecho/chrome-sandbox'" "$postinst"
   grep -F "APPARMOR_PROFILE_TARGET='/etc/apparmor.d/workecho'" "$postinst"
-  grep -F "update-alternatives --remove 'workecho' '/opt/workecho/workecho'" "$postrm"
+  grep -F "update-alternatives --remove 'workecho' '/opt/Workecho/workecho'" "$postrm"
   if grep -F "update-alternatives --remove 'workecho' '/usr/bin/workecho'" "$postrm"; then
     echo "Debian postrm uses the alternatives link instead of the registered target." >&2
     exit 1
@@ -186,11 +186,11 @@ verify_deb_archive() {
 
   local extracted="$temporary_root/deb-root"
   dpkg-deb --extract "$deb" "$extracted"
-  readelf -h "$extracted/opt/workecho/workecho" | tee "$proof_dir/deb-app-elf-header.txt"
+  readelf -h "$extracted/opt/Workecho/workecho" | tee "$proof_dir/deb-app-elf-header.txt"
   grep -F "Advanced Micro Devices X86-64" "$proof_dir/deb-app-elf-header.txt"
 
   mapfile -t native_modules < <(
-    find -L "$extracted/opt/workecho/resources/app.asar.unpacked/node_modules" \
+    find -L "$extracted/opt/Workecho/resources/app.asar.unpacked/node_modules" \
       -type f \
       \( \
         -path '*/node-pty/build/Release/pty.node' -o \
@@ -239,9 +239,9 @@ verify_install_upgrade_launch_remove() {
     2>&1 | tee "$proof_dir/desktop-file-validation.txt"
 
   for installed_path in \
-    /opt/workecho/workecho \
-    /opt/workecho/chrome-sandbox \
-    /opt/workecho/resources/app.asar \
+    /opt/Workecho/workecho \
+    /opt/Workecho/chrome-sandbox \
+    /opt/Workecho/resources/app.asar \
     /usr/share/applications/workecho.desktop; do
     if [[ ! -e "$installed_path" ]]; then
       echo "Installed Debian package is missing: $installed_path" >&2
@@ -252,13 +252,13 @@ verify_install_upgrade_launch_remove() {
     echo "Installed Debian package is missing its desktop icon." >&2
     exit 1
   fi
-  if [[ "$(readlink -f /usr/bin/workecho)" != "/opt/workecho/workecho" ]]; then
+  if [[ "$(readlink -f /usr/bin/workecho)" != "/opt/Workecho/workecho" ]]; then
     echo "/usr/bin/workecho does not resolve to the installed executable." >&2
     exit 1
   fi
 
   local sandbox_owner_mode
-  sandbox_owner_mode="$(stat -c '%u:%g %a' /opt/workecho/chrome-sandbox)"
+  sandbox_owner_mode="$(stat -c '%u:%g %a' /opt/Workecho/chrome-sandbox)"
   printf '%s\n' "$sandbox_owner_mode" | tee "$proof_dir/chrome-sandbox-owner-mode.txt"
   case "$sandbox_owner_mode" in
     "0:0 755" | "0:0 4755") ;;
@@ -270,14 +270,14 @@ verify_install_upgrade_launch_remove() {
 
   local installed_node_pty
   installed_node_pty="$(
-    find -L /opt/workecho/resources/app.asar.unpacked/node_modules \
+    find -L /opt/Workecho/resources/app.asar.unpacked/node_modules \
       -type d -path '*/node-pty' -print -quit
   )"
   if [[ -z "$installed_node_pty" ]]; then
     echo "Installed Debian package is missing the node-pty module directory." >&2
     exit 1
   fi
-  ELECTRON_RUN_AS_NODE=1 /opt/workecho/workecho -e '
+  ELECTRON_RUN_AS_NODE=1 /opt/Workecho/workecho -e '
     const nodePty = require(process.argv[1]);
     const terminal = nodePty.spawn("/bin/sh", ["-c", "printf workecho-node-pty-ok"], {
       name: "xterm-color",
@@ -321,7 +321,7 @@ verify_install_upgrade_launch_remove() {
   package_installed=false
 
   for removed_path in \
-    /opt/workecho \
+    /opt/Workecho \
     /usr/bin/workecho \
     /etc/alternatives/workecho \
     /usr/share/applications/workecho.desktop \

@@ -15,9 +15,9 @@ function makeEnv(config) {
   const home = mkdtempSync(join(tmpdir(), "wb-ext-"));
   const savedHome = process.env.HOME;
   process.env.HOME = home;
-  const cfgDir = join(home, ...(process.platform === "darwin" ? ["Library", "Application Support", "pi"]
-      : process.platform === "linux" ? [(process.env.XDG_CONFIG_HOME ?? join(home, ".config")), "pi"]
-      : ["AppData", "Roaming", "pi"]));
+  const cfgDir = process.platform === "darwin" ? join(home, "Library", "Application Support", "pi")
+      : process.platform === "linux" ? join(process.env.XDG_CONFIG_HOME ?? join(home, ".config"), "pi")
+      : join(home, "AppData", "Roaming", "pi");
     mkdirSync(cfgDir, { recursive: true });
   writeFileSync(join(cfgDir, "wiki-config.json"), JSON.stringify(config));
   const ws = mkdtempSync(join(tmpdir(), "wb-ws-"));
