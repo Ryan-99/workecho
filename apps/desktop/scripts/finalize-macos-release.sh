@@ -14,8 +14,8 @@ fi
 
 release_dir="$(cd "$1" && pwd)"
 version="$2"
-dmg="$release_dir/pi-gui-$version-arm64.dmg"
-zip="$release_dir/pi-gui-$version-arm64.zip"
+dmg="$release_dir/Workecho-$version-arm64.dmg"
+zip="$release_dir/Workecho-$version-arm64.zip"
 packaged_app="$release_dir/mac-arm64/pi-gui.app"
 
 for artifact in "$dmg" "$zip"; do

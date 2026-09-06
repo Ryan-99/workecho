@@ -66,8 +66,8 @@ function Invoke-SevenZip([string]$SevenZip, [string[]]$Arguments) {
   }
 }
 
-$setup = Join-Path $ReleaseDir "pi-gui-$Version-x64-setup.exe"
-$portable = Join-Path $ReleaseDir "pi-gui-$Version-x64-portable.exe"
+$setup = Join-Path $ReleaseDir "Workecho-$Version-x64-setup.exe"
+$portable = Join-Path $ReleaseDir "Workecho-$Version-x64-portable.exe"
 Assert-ValidSignature $setup
 Assert-ValidSignature $portable
 
