@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
-import { FileText, Plus, Sparkles } from "lucide-react";
+import { FileText, Plus, RotateCcw, Sparkles } from "lucide-react";
 import { fileExtension, formatFileSize } from "../composer-paste";
+import { summarizeRunError } from "../timeline-errors";
 import { ImageLightbox } from "./ImageLightbox";
 import ReactMarkdown from "react-markdown";
 import type { SessionTranscriptMessage, SessionTranscriptToolCall } from "@pi-gui/pi-sdk-driver";
@@ -130,6 +131,25 @@ export function renderTimelineItems(items: readonly unknown[]): ReactNode[] {
   let i = 0;
   while (i < items.length) {
     const it = items[i] as Record<string, unknown> | null;
+    if (it?.kind === "error" || (it?.kind === "activity" && it.tone === "error")) {
+      // 连续的运行失败（含 pi 自动重试产生的重复错误）收成一个错误块：
+      // 简短原因 + 可展开详情 + 重试，不再逐条铺开原始报错
+      let j = i;
+      while (j < items.length) {
+        const cur = items[j] as Record<string, unknown> | null;
+        if (cur?.kind === "error" || (cur?.kind === "activity" && cur.tone === "error")) j++;
+        else break;
+      }
+      out.push(
+        <ErrorRunBlock
+          key={`err-${i}-${j}`}
+          errors={items.slice(i, j) as unknown as TimelineErrorLike[]}
+          canRetry={j === items.length}
+        />,
+      );
+      i = j;
+      continue;
+    }
     if (it?.kind === "tool") {
       // 连续工具调用整体包进"思考"折叠块：默认收起，点开才看分步明细
       let j = i;
@@ -241,6 +261,53 @@ function runSeconds(calls: SessionTranscriptToolCall[]): number {
   const t1 = Date.parse(calls[calls.length - 1]?.createdAt ?? "");
   if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return 0;
   return Math.round((t1 - t0) / 1000);
+}
+
+/* ------------------------------------------------------------------ */
+/* 运行失败块                                                          */
+/* ------------------------------------------------------------------ */
+
+/** 错误项的宽松形状：历史加载是 kind="error"（message 字段），实时事件是 activity（label 字段） */
+interface TimelineErrorLike {
+  readonly kind: string;
+  readonly message?: string;
+  readonly label?: string;
+}
+
+/** 连续失败收成一块：一句原因（重复失败标注次数）+ 详情折叠 + 重试 */
+function ErrorRunBlock({ errors, canRetry }: { errors: readonly TimelineErrorLike[]; canRetry: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const raws = errors.map((e) => (e.message ?? e.label ?? "").trim()).filter(Boolean);
+  const last = raws[raws.length - 1] ?? "";
+  const label = summarizeRunError(last);
+
+  return (
+    <div className="timeline-error-run">
+      <div className="timeline-error-run__row">
+        <span className="timeline-error-run__dot" />
+        <span className="timeline-error-run__label">
+          {label}
+          {errors.length > 1 ? `（已自动重试 ${errors.length - 1} 次）` : ""}
+        </span>
+        {last && (
+          <button type="button" className="timeline-error-run__link" onClick={() => setExpanded(!expanded)}>
+            {expanded ? "收起" : "详情"}
+          </button>
+        )}
+        {canRetry && (
+          <button
+            type="button"
+            className="timeline-error-run__retry"
+            title="重新发送本会话最后一条消息"
+            onClick={() => window.dispatchEvent(new CustomEvent("retry-last-turn"))}
+          >
+            <RotateCcw size={11} /> 重试
+          </button>
+        )}
+      </div>
+      {expanded && last && <pre className="timeline-error-run__detail">{raws.join("\n\n")}</pre>}
+    </div>
+  );
 }
 
 function renderSingleItem(item: unknown, index: number, isLastMessage = false): ReactNode {

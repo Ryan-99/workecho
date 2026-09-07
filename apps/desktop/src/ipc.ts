@@ -453,6 +453,7 @@ export interface PiDesktopApi {
   ): () => void;
   checkUpdate(): Promise<unknown>;
   openReleases(url?: string): Promise<void>;
+  appVersion(): Promise<string>;
   openDir(dirPath: string): Promise<unknown>;
   /** 返回一次性目录令牌（10 分钟有效、用后即焚），不是裸路径 */
   pickDirectory(): Promise<string | null>;

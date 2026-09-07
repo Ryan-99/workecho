@@ -38,4 +38,16 @@ export interface SessionTranscriptToolCall {
   readonly createdAt: string;
 }
 
-export type SessionTranscriptItem = SessionTranscriptMessage | SessionTranscriptToolCall;
+/**
+ * 一次运行失败（模型 API 报错等）：assistant 消息 stopReason=error 且没有正文。
+ * 之前这类消息被静默丢弃，重开历史会话时完全看不到失败痕迹；现在如实带出
+ * 原始错误文本，由渲染层做简短摘要 + 折叠展示。
+ */
+export interface SessionTranscriptError {
+  readonly kind: "error";
+  readonly id: string;
+  readonly message: string;
+  readonly createdAt: string;
+}
+
+export type SessionTranscriptItem = SessionTranscriptMessage | SessionTranscriptToolCall | SessionTranscriptError;

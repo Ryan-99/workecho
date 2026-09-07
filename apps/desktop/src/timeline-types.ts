@@ -1,6 +1,7 @@
-import type { SessionTranscriptMessage, SessionTranscriptRole } from "@pi-gui/pi-sdk-driver";
+import type { SessionTranscriptError, SessionTranscriptMessage, SessionTranscriptRole } from "@pi-gui/pi-sdk-driver";
 
 export type SessionRole = SessionTranscriptRole;
+export type SessionError = SessionTranscriptError;
 export type TimelineTone = "neutral" | "success" | "warning" | "error";
 export type TimelineToolStatus = "running" | "success" | "error";
 export type TimelineSummaryPresentation = "inline" | "divider";
@@ -38,7 +39,12 @@ export interface TimelineSummary {
   readonly presentation: TimelineSummaryPresentation;
 }
 
-export type TranscriptMessage = SessionTranscriptMessage | TimelineActivity | TimelineToolCall | TimelineSummary;
+export type TranscriptMessage =
+  | SessionTranscriptMessage
+  | SessionTranscriptError
+  | TimelineActivity
+  | TimelineToolCall
+  | TimelineSummary;
 
 /**
  * A derived, view-only marker inserted between turns to show how long the agent

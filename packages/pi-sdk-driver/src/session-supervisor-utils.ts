@@ -260,6 +260,18 @@ export function transcriptFromMessages(messages: readonly unknown[], fallbackTim
         ...(attachments.length > 0 ? { attachments } : {}),
         createdAt,
       });
+    } else if (role === "assistant" && message.stopReason === "error") {
+      // 失败的运行：没有正文、只有 errorMessage。带出来供渲染层折叠展示，
+      // 否则重开历史会话时失败痕迹完全消失。
+      const errorMessage = typeof message.errorMessage === "string" ? message.errorMessage.trim() : "";
+      if (errorMessage) {
+        transcript.push({
+          kind: "error",
+          id: typeof message.id === "string" ? message.id : `error-${index}`,
+          message: errorMessage,
+          createdAt,
+        });
+      }
     }
 
     if (role === "assistant") {

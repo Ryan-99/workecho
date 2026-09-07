@@ -490,9 +490,20 @@ export class SessionSupervisor {
   async createSession(workspace: WorkspaceRef, options?: CreateSessionOptions): Promise<SessionSnapshot> {
     await this.touchWorkspace(workspace);
 
-    const initialModel = options?.initialModel
-      ? await this.resolveModel(options.initialModel.provider, options.initialModel.modelId)
-      : undefined;
+    // 默认模型组合可能已失效（如默认 provider 的模型列表被重配）。解析失败时
+    // 不再让整个新建会话失败——省略 initialModel，交给 pi 按可用模型自行回落。
+    let initialModel: Awaited<ReturnType<SessionSupervisor["resolveModel"]>> | undefined;
+    if (options?.initialModel) {
+      try {
+        initialModel = await this.resolveModelWithRefresh(options.initialModel.provider, options.initialModel.modelId);
+      } catch (error) {
+        console.warn(
+          `[pi-sdk-driver] initial model ${options.initialModel.provider}:${options.initialModel.modelId} ` +
+            `unavailable; falling back to default model resolution:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
     const createOptions: CreateAgentSessionOptions = {
       cwd: workspace.path,
       sessionManager: SessionManager.create(workspace.path),
@@ -708,6 +719,10 @@ export class SessionSupervisor {
   async sendUserMessage(sessionRef: SessionRef, input: SessionMessageInput): Promise<void> {
     const record = await this.ensureRecord(sessionRef);
     const session = this.requireSession(record);
+    // 发送前自愈：会话持久化的模型可能已失效（provider 重建/手改 models.json/
+    // 删除 provider），与其让 prompt 深处报 "Unknown model"，不如在这里刷新
+    // registry 后回落到可用模型，并把切换持久化到会话里。
+    await this.ensureSessionModelResolvable(record);
     const isExtensionCommand = this.isExtensionCommand(session, input.text);
     if (session.isStreaming && !isExtensionCommand && !input.deliverAs) {
       throw new Error("Session is already streaming. Specify deliverAs ('steer' or 'followUp') to queue the message.");
@@ -849,7 +864,7 @@ export class SessionSupervisor {
       throw new Error(`Session ${sessionKey(record.ref)} is not active.`);
     }
 
-    const model = await this.resolveModel(selection.provider, selection.modelId);
+    const model = await this.resolveModelWithRefresh(selection.provider, selection.modelId);
     const auth = await (await this.deps()).modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok) {
       throw new Error(auth.error);
@@ -1575,6 +1590,84 @@ export class SessionSupervisor {
       throw new Error(`Unknown model ${provider}:${modelId}`);
     }
     return model;
+  }
+
+  /**
+   * resolveModel + 一次性 registry 刷新重试：models.json 可能被在应用外手改
+   * （增删模型、改 baseUrl），运行中的 registry 不会自动重读——先解析，失败则
+   * refresh 后再试一次，仍找不到才抛错。
+   */
+  private async resolveModelWithRefresh(provider: string, modelId: string) {
+    try {
+      return await this.resolveModel(provider, modelId);
+    } catch (error) {
+      const { modelRegistry } = await this.deps();
+      try {
+        await modelRegistry.refresh();
+      } catch {
+        // best effort：刷新失败时让原始错误照常抛出
+      }
+      return this.resolveModel(provider, modelId);
+    }
+  }
+
+  /**
+   * 会话模型失效时的兜底：优先回到设置里的默认模型，其次按可用快照顺序，
+   * 最后扫刷新后的 registry（快照可能还没重建，新加的模型只在 registry 里）。
+   * 候选一律要求在当前 registry 中可解析且已配置认证。
+   */
+  private async pickFallbackModel(record: ManagedSessionRecord): Promise<{ provider: string; modelId: string } | undefined> {
+    const { modelRegistry, modelRuntime } = await this.deps();
+    const settingsManager = record.session?.settingsManager as
+      | { getDefaultProvider?: () => string; getDefaultModel?: () => string }
+      | undefined;
+    const candidates: { provider: string; modelId: string }[] = [];
+    const defaultProvider = settingsManager?.getDefaultProvider?.();
+    const defaultModelId = settingsManager?.getDefaultModel?.();
+    if (defaultProvider && defaultModelId) {
+      candidates.push({ provider: defaultProvider, modelId: defaultModelId });
+    }
+    for (const model of modelRuntime.getAvailableSnapshot()) {
+      candidates.push({ provider: model.provider, modelId: model.id });
+    }
+    for (const model of modelRegistry.getAll()) {
+      candidates.push({ provider: model.provider, modelId: model.id });
+    }
+    for (const candidate of candidates) {
+      const found = modelRegistry.find(candidate.provider, candidate.modelId);
+      if (found && modelRuntime.hasConfiguredAuth(found.provider)) {
+        return { provider: found.provider, modelId: found.id };
+      }
+    }
+    return undefined;
+  }
+
+  private async ensureSessionModelResolvable(record: ManagedSessionRecord): Promise<void> {
+    const config = record.config;
+    if (!config?.provider || !config.modelId) {
+      return;
+    }
+    const { modelRegistry } = await this.deps();
+    if (modelRegistry.find(config.provider, config.modelId)) {
+      return;
+    }
+    try {
+      await modelRegistry.refresh();
+    } catch {
+      // best effort
+    }
+    if (modelRegistry.find(config.provider, config.modelId)) {
+      return;
+    }
+    const fallback = await this.pickFallbackModel(record);
+    if (!fallback) {
+      return;
+    }
+    console.warn(
+      `[pi-sdk-driver] session model ${config.provider}:${config.modelId} is no longer available; ` +
+        `switching to ${fallback.provider}:${fallback.modelId}`,
+    );
+    await this.setSessionModel(record.ref, fallback);
   }
 
   private applySessionThinkingLevel(session: AgentSession, thinkingLevel: string): void {

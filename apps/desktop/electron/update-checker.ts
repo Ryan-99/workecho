@@ -2,8 +2,8 @@ import { app, net, Notification, shell } from "electron";
 import { workechoNotificationIcon } from "./brand-notification";
 
 const RELEASES_URL =
-  "https://api.github.com/repos/Ryan-Sangfor/workbench/releases?per_page=1";
-const RELEASES_PAGE = "https://github.com/Ryan-Sangfor/workbench/releases";
+  "https://api.github.com/repos/Ryan-99/workecho/releases?per_page=1";
+const RELEASES_PAGE = "https://github.com/Ryan-99/workecho/releases";
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const INITIAL_DELAY_MS = 15_000; // 15 seconds after launch
@@ -51,8 +51,8 @@ export function showUpdateNotification(
   }
   const notification = new Notification({
     ...(workechoNotificationIcon() ? { icon: workechoNotificationIcon()! } : {}),
-    title: "pi-gui Release Available",
-    body: `Version ${latestVersion} is available (you have ${currentVersion}). Click to view the release.`,
+    title: "Workecho 有新版本",
+    body: `新版本 ${latestVersion} 可用（当前 ${currentVersion}），点击查看。`,
   });
   notification.on("click", () => {
     void openReleasesPage(releaseUrl);

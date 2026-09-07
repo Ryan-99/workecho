@@ -333,6 +333,7 @@ contextBridge.exposeInMainWorld("piApp", {
     ipcRenderer.invoke("workbench:delete-session-forever", workspaceId, sessionId) as Promise<DesktopAppState | null>,
   checkUpdate: () => ipcRenderer.invoke("workbench:check-update"),
   openReleases: (url?: string) => ipcRenderer.invoke("workbench:open-releases", url),
+  appVersion: () => ipcRenderer.invoke("workbench:get-version") as Promise<string>,
   minimizeWindow: () => ipcRenderer.invoke("workbench:minimize-window"),
   updateEntity: (entityType: string, entityId: string, updates: Record<string, unknown>) =>
     ipcRenderer.invoke("workbench:update-entity", entityType, entityId, updates),

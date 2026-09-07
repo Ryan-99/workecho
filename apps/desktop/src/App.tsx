@@ -287,6 +287,19 @@ export default function App() {
     applyState(s);
   }, []);
 
+  // 失败重试：时间线错误块上的"重试"按钮把当前会话最后一条用户消息重新发出
+  useEffect(() => {
+    const handler = () => {
+      const userMsgs = (transcript?.transcript ?? []).filter(
+        (item): item is Extract<typeof item, { kind: "message" }> => item.kind === "message" && item.role === "user",
+      );
+      const last = userMsgs[userMsgs.length - 1];
+      if (last?.text) void sendMessage(last.text);
+    };
+    window.addEventListener("retry-last-turn", handler as EventListener);
+    return () => window.removeEventListener("retry-last-turn", handler as EventListener);
+  }, [transcript, sendMessage]);
+
   // 新建会话（返回新会话 id——侧栏分组用它把会话直接归入分组）
   const newSession = useCallback(async (): Promise<string | undefined> => {
     const s = await window.piApp.createSession({ workspaceId: state?.selectedWorkspaceId ?? "" });

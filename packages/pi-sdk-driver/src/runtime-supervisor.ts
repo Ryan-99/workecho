@@ -76,6 +76,10 @@ interface ProjectWritableSettingsManager {
 
 export interface RuntimeSupervisorOptions {
   readonly agentDir?: string;
+  /** 共享依赖（同一 ModelRuntime/registry）。不传则自建——但两个 supervisor
+   *  各持一份 registry 会导致"设置页编辑 provider 只刷新一边"的割裂：
+   *  会话侧仍用旧模型表，选新模型即 Unknown model。驱动层务必传入同一份。 */
+  readonly runtimeDeps?: Promise<RuntimeDependencies>;
   readonly modelRuntime?: ModelRuntime;
   readonly modelRegistry?: ModelRegistry;
   readonly extensionFactories?: readonly ExtensionFactory[];
@@ -100,7 +104,7 @@ export class RuntimeSupervisor implements RuntimeResourceDriver {
 
   constructor(options: RuntimeSupervisorOptions = {}) {
     this.agentDirSync = resolve(options.agentDir ?? getAgentDir());
-    this.depsPromise = createRuntimeDependencies(options);
+    this.depsPromise = options.runtimeDeps ?? createRuntimeDependencies(options);
     this.extensionFactories = options.extensionFactories ?? [];
     this.inlineExtensionMetadata = options.inlineExtensionMetadata ?? [];
   }

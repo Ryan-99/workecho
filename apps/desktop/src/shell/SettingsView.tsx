@@ -970,6 +970,10 @@ function HooksSettingsSection() {
 function AboutSection() {
   const [checking, setChecking] = useState(false);
   const [updateResult, setUpdateResult] = useState<string | undefined>();
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    (window.piApp as any).appVersion?.().then((v: string) => setVersion(v)).catch(() => {});
+  }, []);
   const handleCheck = async () => {
     setChecking(true);
     setUpdateResult(undefined);
@@ -983,10 +987,13 @@ function AboutSection() {
           await (window.piApp as any).openReleases(result.releaseUrl);
         }
       } else {
-        setUpdateResult(`检查失败: ${result.message}`);
+        // 具体原因只进控制台，界面上保持一句简短提示 + 可再次点击按钮重试
+        console.warn("[update] 检查更新失败:", result.message);
+        setUpdateResult("检查失败，请稍后重试");
       }
     } catch (e) {
-      setUpdateResult(`检查失败: ${(e as Error).message}`);
+      console.warn("[update] 检查更新异常:", e);
+      setUpdateResult("检查失败，请稍后重试");
     } finally {
       setChecking(false);
     }
@@ -995,7 +1002,7 @@ function AboutSection() {
   return (
     <section className="settings-section">
       <h2>关于</h2>
-      <div className="settings-row"><label>版本</label><span className="hint">Workecho</span></div>
+      <div className="settings-row"><label>版本</label><span className="hint">{version || "Workecho"}</span></div>
       <div className="settings-row"><label>平台</label><span className="hint">{window.piApp.platform}</span></div>
       <div className="settings-row" style={{ paddingTop: 12 }}>
         <label>更新</label>

@@ -1044,10 +1044,10 @@ async function runManualUpdateCheck(): Promise<void> {
       // be silently suppressed if the OS permission is denied.
       const choice = await showDialog({
         type: "info",
-        title: "pi-gui",
-        message: `Version ${result.latestVersion} is available.`,
-        detail: `You have ${result.currentVersion}.`,
-        buttons: ["Download", "Later"],
+        title: "Workecho",
+        message: `发现新版本 ${result.latestVersion}`,
+        detail: `当前版本 ${result.currentVersion}`,
+        buttons: ["前往下载", "稍后"],
         defaultId: 0,
         cancelId: 1,
       });
@@ -1060,28 +1060,27 @@ async function runManualUpdateCheck(): Promise<void> {
     if (result.status === "up-to-date") {
       await showDialog({
         type: "info",
-        title: "pi-gui",
-        message: `You're up to date on version ${result.currentVersion}.`,
-        buttons: ["OK"],
+        title: "Workecho",
+        message: `已是最新版本（${result.currentVersion}）`,
+        buttons: ["好"],
       });
       return;
     }
 
+    console.warn("[update] 检查更新失败:", result.message);
     await showDialog({
       type: "warning",
-      title: "pi-gui",
-      message: "Could not check for updates right now.",
-      detail: result.message,
-      buttons: ["OK"],
+      title: "Workecho",
+      message: "暂时无法检查更新，请稍后重试",
+      buttons: ["好"],
     });
   } catch (error) {
-    console.error("pi-gui: manual update check failed:", error);
+    console.error("[update] 手动检查更新异常:", error);
     await showDialog({
       type: "warning",
-      title: "pi-gui",
-      message: "Could not check for updates right now.",
-      detail: error instanceof Error ? error.message : String(error),
-      buttons: ["OK"],
+      title: "Workecho",
+      message: "暂时无法检查更新，请稍后重试",
+      buttons: ["好"],
     }).catch(() => undefined);
   }
 }
@@ -1099,7 +1098,7 @@ function installApplicationMenu(): void {
         { type: "separator" },
         {
           id: CHECK_FOR_UPDATES_MENU_ITEM_ID,
-          label: "Check for Updates…",
+          label: "检查更新…",
           click: () => {
             void runManualUpdateCheck();
           },
@@ -1919,6 +1918,8 @@ app.whenReady().then(async () => {
   ipcMain.handle("workbench:open-releases", async (_event, url?: string) => {
     await openReleasesPage(url);
   });
+  // 应用版本号（设置页"关于"展示，避免只显示产品名）
+  ipcMain.handle("workbench:get-version", () => app.getVersion());
 
   // 卡片配置：读取 / 保存
   ipcMain.handle("workbench:get-cards", () => readCardConfig(configuredUserDataDir));

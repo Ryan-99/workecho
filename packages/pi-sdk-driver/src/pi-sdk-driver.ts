@@ -45,7 +45,9 @@ export class PiSdkDriver implements SessionDriver {
     this.generateThreadTitleOverride = options.generateThreadTitleOverride;
 
     this.supervisor = new SessionSupervisor({ ...options, runtimeDeps: depsPromise });
-    this.runtimeSupervisor = new RuntimeSupervisor(options);
+    // 两个 supervisor 必须共享同一份 ModelRuntime/registry：设置页编辑 provider
+    // 只刷新 runtime 侧，若会话侧另持一份旧 registry，选新模型即 Unknown model。
+    this.runtimeSupervisor = new RuntimeSupervisor({ ...options, runtimeDeps: depsPromise });
   }
 
   /** pi agent 配置目录（尊重 PI_CODING_AGENT_DIR 覆盖）——删除会话文件等需要落盘的场景用 */

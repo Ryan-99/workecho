@@ -31,6 +31,7 @@ export type { GenerateThreadTitleOptions } from "./thread-title-generator.js";
 export type { DistillSkillOptions } from "./skill-distiller.js";
 export type {
   SessionTranscriptAttachment,
+  SessionTranscriptError,
   SessionTranscriptItem,
   SessionTranscriptMessage,
   SessionTranscriptRole,

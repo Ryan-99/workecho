@@ -174,6 +174,37 @@ test("custom provider edit + responses chat + archive delete + session groups", 
       )
       .toContain("responses 回复");
 
+    /* ── 模型失效自愈：把会话正在用的模型从 provider 里删掉后，发送不再报 Unknown model ── */
+    // 模拟用户重配模型列表：编辑 zz-relay，把 mock-chat 换成 mock-chat-v2。
+    // 保存会刷新 registry，会话仍持久化着 zz-relay:mock-chat——发送前应自动
+    // 回落到可用模型并完成切换（此前这条路径直接报 Unknown model）。
+    await window.locator(".sidebar-footer button", { hasText: "设置" }).click();
+    await window.locator(".session-item", { hasText: "模型 Provider" }).click();
+    await window.locator(".provider-row", { hasText: "zz-relay" }).locator("button", { hasText: "编辑" }).click();
+    await fillCustomProviderForm(window, { models: "mock-chat-v2" });
+    await window.locator(".custom-provider-form .btn-primary", { hasText: "保存修改" }).click();
+    await expect(window.locator(".provider-row", { hasText: "zz-relay" })).toBeVisible({ timeout: 15_000 });
+    await window.locator(".sidebar-footer button", { hasText: "返回对话" }).click();
+
+    await window.evaluate(async () => {
+      await (window as any).piApp.submitComposer("模型列表变了，再回复一句");
+    });
+    await expect
+      .poll(
+        async () => {
+          const state = await getDesktopState(window);
+          const ws = state.workspaces.find((entry) => entry.id === workspace.id);
+          const session = ws?.sessions.find((entry) => entry.id === state.selectedSessionId);
+          return JSON.stringify({
+            modelId: session?.config?.modelId,
+            lastError: state.lastError ?? null,
+            preview: session?.preview ?? "",
+          });
+        },
+        { timeout: 60_000 },
+      )
+      .toEqual(JSON.stringify({ modelId: "mock-chat-v2", lastError: null, preview: "你好，这是 responses 回复。" }));
+
     /* ── 分组：组内新建 + 拖拽换组 ── */
     await window.locator(".group-add-btn").click();
     await window.locator(".group-name-input").fill("项目A");
