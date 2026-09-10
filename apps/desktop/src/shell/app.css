@@ -4139,42 +4139,54 @@ pre.tool-compact {
 .item-label { display: flex; flex-direction: column; gap: 1px; }
 .item-provider { font-size: 11px; color: var(--text-muted); }
 .dropdown-empty { padding: 12px; font-size: 12px; color: var(--text-muted); text-align: center; }
-:root.dark .timeline-error-run { border-color: #5c2e2e; background: rgba(220, 38, 38, 0.12); }
-:root.dark .timeline-error-run__retry { border-color: #5c2e2e; background: transparent; color: var(--danger); }
-:root.dark .timeline-error-run__detail { background: #262627; }
 
-/* 运行失败块：一句原因 + 详情折叠 + 重试（替代逐条铺开的原始报错） */
+/* 运行失败块：一句原因 + 详情折叠 + 重试（替代逐条铺开的原始报错）。
+   默认灰色弱化（瞬时错误：网络/限流/服务波动）；仅需要用户处理的严重错误
+   （认证/余额/模型）用 --severe 的偏黑深红，避免亮红突兀 */
 .timeline-error-run {
   margin: 6px 0;
   padding: 8px 12px;
-  border: 1px solid #f3d6d6;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--danger-bg);
+  background: var(--bg-assistant-bubble);
 }
 .timeline-error-run__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.timeline-error-run__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--danger); flex: none; }
-.timeline-error-run__label { font-size: 12px; color: var(--danger); flex: 1; min-width: 0; }
+.timeline-error-run__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); flex: none; }
+.timeline-error-run__label { font-size: 12px; color: var(--text-secondary); flex: 1; min-width: 0; }
 .timeline-error-run__link {
   border: none; background: none; padding: 0;
   font-size: 12px; color: var(--text-muted); cursor: pointer;
 }
-.timeline-error-run__link:hover { color: var(--text-primary, #1a1a1a); }
+.timeline-error-run__link:hover { color: var(--text); }
 .timeline-error-run__retry {
   display: inline-flex; align-items: center; gap: 4px;
-  border: 1px solid #f3d6d6; background: #fff;
+  border: 1px solid var(--border-strong); background: var(--bg);
   padding: 2px 10px; border-radius: 999px;
-  font-size: 12px; color: var(--danger); cursor: pointer;
+  font-size: 12px; color: var(--text-secondary); cursor: pointer;
 }
-.timeline-error-run__retry:hover { background: var(--danger); color: #fff; }
+.timeline-error-run__retry:hover { background: var(--bg-hover); }
 .timeline-error-run__detail {
   margin: 8px 0 0; padding: 8px 10px;
   font-size: 11px; line-height: 1.5;
   color: var(--text-muted);
-  background: #fafafa;
+  background: var(--bg-muted);
   border-radius: var(--radius-sm);
   white-space: pre-wrap; word-break: break-all;
   max-height: 200px; overflow: auto;
 }
+/* 严重错误：偏黑的哑光深红 */
+.timeline-error-run--severe { border-color: #e6d8d8; background: #faf7f7; }
+.timeline-error-run--severe .timeline-error-run__dot { background: #7f2c2c; }
+.timeline-error-run--severe .timeline-error-run__label { color: #7f2c2c; }
+.timeline-error-run--severe .timeline-error-run__retry { border-color: #e0cfcf; color: #7f2c2c; background: transparent; }
+.timeline-error-run--severe .timeline-error-run__retry:hover { background: #f3eaea; }
+:root.dark .timeline-error-run { background: #262627; }
+:root.dark .timeline-error-run__detail { background: #1e1e1f; }
+:root.dark .timeline-error-run--severe { border-color: #453030; background: rgba(127, 44, 44, 0.14); }
+:root.dark .timeline-error-run--severe .timeline-error-run__label { color: #d9a3a3; }
+:root.dark .timeline-error-run--severe .timeline-error-run__dot { background: #d9a3a3; }
+:root.dark .timeline-error-run--severe .timeline-error-run__retry { color: #d9a3a3; border-color: #453030; }
+:root.dark .timeline-error-run--severe .timeline-error-run__retry:hover { background: rgba(127, 44, 44, 0.28); }
 
 /* 会话模型已失效：如实标出，提示用户切换 */
 .model-selector-btn--stale .model-label { color: var(--warn); }

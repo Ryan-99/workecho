@@ -223,6 +223,8 @@ test("custom provider edit + responses chat + archive delete + session groups", 
     });
     await expect(window.locator(".timeline-error-run")).toBeVisible({ timeout: 90_000 });
     await expect(window.locator(".timeline-error-run__label")).toContainText("网络或服务异常");
+    // 瞬时错误走灰色弱化（不带 --severe 深红修饰）
+    await expect(window.locator(".timeline-error-run")).not.toHaveClass(/timeline-error-run--severe/);
     await expect(window.locator(".timeline-error-run__retry")).toBeVisible();
     await expect(window.locator(".error-bubble")).toHaveCount(0);
     const failedState = await getDesktopState(window);

@@ -145,7 +145,7 @@ export class NotificationManager {
     if (event.type === "runFailed") {
       // pi 自动重试失败会连发多个 runFailed——同会话同原因 2 分钟内只弹一次，
       // 且正文用简短摘要，不把整段原始错误 JSON 塞进系统通知
-      const reason = summarizeRunError(event.error.message);
+      const { label: reason } = summarizeRunError(event.error.message);
       const dedupeKey = `${sessionKey(event.sessionRef)}:${reason}`;
       const now = Date.now();
       if (this.lastFailureNotifyKey === dedupeKey && now - this.lastFailureNotifyAt < 2 * 60_000) {

@@ -279,10 +279,10 @@ function ErrorRunBlock({ errors, canRetry }: { errors: readonly TimelineErrorLik
   const [expanded, setExpanded] = useState(false);
   const raws = errors.map((e) => (e.message ?? e.label ?? "").trim()).filter(Boolean);
   const last = raws[raws.length - 1] ?? "";
-  const label = summarizeRunError(last);
+  const { label, severe } = summarizeRunError(last);
 
   return (
-    <div className="timeline-error-run">
+    <div className={`timeline-error-run ${severe ? "timeline-error-run--severe" : ""}`}>
       <div className="timeline-error-run__row">
         <span className="timeline-error-run__dot" />
         <span className="timeline-error-run__label">
