@@ -229,6 +229,11 @@ test("custom provider edit + responses chat + archive delete + session groups", 
     await expect(window.locator(".error-bubble")).toHaveCount(0);
     const failedState = await getDesktopState(window);
     expect(failedState.lastError ?? null).toBeNull();
+    // 等待尾随事件（重试/状态同步）落地后复查——lastError 不应被任何事件再次投影出原始报错
+    await window.waitForTimeout(2_500);
+    const settledState = await getDesktopState(window);
+    expect(settledState.lastError ?? null).toBeNull();
+    await expect(window.locator(".error-bubble")).toHaveCount(0);
 
     /* ── 分组：组内新建 + 拖拽换组 ── */
     await window.locator(".group-add-btn").click();

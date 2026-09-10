@@ -2289,9 +2289,10 @@ export class DesktopAppStore implements AppStoreInternals {
         this.sessionState.sessionSubscriptions.delete(key);
       }
 
-      if (event.type === "runFailed") {
-        this.sessionState.sessionErrorsBySession.set(key, event.error.message);
-      } else if (event.type === "runCompleted" || event.type === "sessionClosed") {
+      // 运行失败不进 sessionErrorsBySession：该 map 会经 resolveSelectedSessionError
+      // 投影回 state.lastError，等于把原始报错又裸露一遍（时间线错误块已是唯一展示）。
+      // 子线程交付失败检测走 session.status === "failed"，不依赖这里。
+      if (event.type === "runCompleted" || event.type === "sessionClosed") {
         this.sessionState.sessionErrorsBySession.delete(key);
       }
 
@@ -2809,15 +2810,18 @@ export class DesktopAppStore implements AppStoreInternals {
     return this.emit();
   }
 
-  /** silent: 仍记录到 sessionErrorsBySession（子线程交付状态等依赖它），
-   *  但不写 lastError——运行失败的原始报错已由时间线错误块展示，避免二次裸露 */
+  /** silent（运行失败）：sessionErrorsBySession 与 lastError 都不写——前者会被
+   * resolveSelectedSessionError 投影回 lastError 造成二次裸露；原始报错的唯一
+   * 展示是时间线错误块。非 silent（动作级错误）照旧两者都写。 */
   async withSessionError(
     sessionRef: SessionRef,
     error: unknown,
     options?: { readonly silent?: boolean },
   ): Promise<DesktopAppState> {
     const message = describeStoreError(error);
-    this.sessionState.sessionErrorsBySession.set(sessionKey(sessionRef), message);
+    if (!options?.silent) {
+      this.sessionState.sessionErrorsBySession.set(sessionKey(sessionRef), message);
+    }
     this.state = {
       ...this.state,
       ...(options?.silent
