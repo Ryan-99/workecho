@@ -413,7 +413,10 @@ export async function submitComposerToSession(
     if (optimisticSteerMessage) {
       removeOptimisticQueuedUserMessage(store, sessionRef, optimisticSteerMessage.id);
     }
-    return store.withSessionError(sessionRef, error);
+    // 运行失败（驱动已发 runFailed，时间线里渲染成错误块）不再把原始报错
+    // 写进 lastError —— 否则同一段错误 JSON 会在错误块下面再裸露一遍
+    const isRunFailure = (error as { workechoRunFailure?: boolean }).workechoRunFailure === true;
+    return store.withSessionError(sessionRef, error, isRunFailure ? { silent: true } : undefined);
   }
 }
 

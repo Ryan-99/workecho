@@ -796,6 +796,45 @@ export class SessionSupervisor {
         ...(runId ? { runId } : {}),
       });
       await this.emit(record, sessionUpdatedEvent(record));
+      // pi 在流建立前抛错（连接拒绝等）时不会把失败写进会话文件——时间线重载后
+      // 这条失败会完全消失。补记一条与 pi 自身格式一致的 assistant error 消息
+      // （pi 已记录过则不重复），让历史加载也能看到失败痕迹。
+      try {
+        const manager = record.session?.sessionManager;
+        if (manager) {
+          const messages = manager.buildSessionContext().messages;
+          const last = messages[messages.length - 1] as Record<string, unknown> | undefined;
+          const alreadyRecorded = last?.role === "assistant" && last?.stopReason === "error";
+          const lastAssistant = [...messages]
+            .reverse()
+            .find((message) => (message as unknown as Record<string, unknown>)?.role === "assistant") as unknown as Record<string, unknown> | undefined;
+          if (!alreadyRecorded) {
+            const provider = record.config?.provider
+              ?? (typeof lastAssistant?.provider === "string" ? lastAssistant.provider : undefined);
+            const model = record.config?.modelId
+              ?? (typeof lastAssistant?.model === "string" ? lastAssistant.model : undefined);
+            manager.appendMessage({
+              role: "assistant",
+              content: [],
+              api: typeof lastAssistant?.api === "string" ? lastAssistant.api : "openai-completions",
+              ...(provider ? { provider } : {}),
+              ...(model ? { model } : {}),
+              usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+              stopReason: "error",
+              errorMessage: error instanceof Error ? error.message : String(error),
+              timestamp: Date.now(),
+            } as unknown as Parameters<SessionManager["appendMessage"]>[0]);
+            forcePersistSession(manager);
+          }
+        }
+      } catch (persistError) {
+        console.warn("[pi-sdk-driver] persist run failure to session file failed:", persistError);
+      }
+      // 运行失败的原始报错已经由上面的 runFailed 事件渲染成时间线错误块；
+      // 打上标记让桌面层不再把同一段原始文本写进 lastError 做第二次展示
+      if (error instanceof Error) {
+        Object.assign(error, { workechoRunFailure: true });
+      }
       throw error;
     }
   }

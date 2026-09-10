@@ -8,6 +8,7 @@ import type { DesktopAppState } from "../src/desktop-state";
 import { sessionKey } from "@pi-gui/pi-sdk-driver";
 import type { SessionDriverEvent, SessionRef } from "@pi-gui/session-driver";
 import { getSelectedSession } from "../src/desktop-state";
+import { summarizeRunError } from "../src/timeline-errors";
 import { isSessionActivelyViewed } from "./session-visibility";
 
 const MAX_COMPLETED_RUN_KEYS = 500;
@@ -21,6 +22,9 @@ export class NotificationManager {
   private lastActivelyViewedSession: SessionRef | undefined;
   private backgroundCandidateSessions: SessionRef[] = [];
   private permissionRequestPending = false;
+  /** 失败通知去重：同一会话同一原因 2 分钟内只弹一次（pi 自动重试会连发多个 runFailed） */
+  private lastFailureNotifyKey: string | undefined;
+  private lastFailureNotifyAt = 0;
 
   constructor(
     private readonly store: DesktopAppStore,
@@ -139,7 +143,17 @@ export class NotificationManager {
     }
 
     if (event.type === "runFailed") {
-      await this.showNotification(event.sessionRef, this.titleForSession(event.sessionRef), event.error.message);
+      // pi 自动重试失败会连发多个 runFailed——同会话同原因 2 分钟内只弹一次，
+      // 且正文用简短摘要，不把整段原始错误 JSON 塞进系统通知
+      const reason = summarizeRunError(event.error.message);
+      const dedupeKey = `${sessionKey(event.sessionRef)}:${reason}`;
+      const now = Date.now();
+      if (this.lastFailureNotifyKey === dedupeKey && now - this.lastFailureNotifyAt < 2 * 60_000) {
+        return;
+      }
+      this.lastFailureNotifyKey = dedupeKey;
+      this.lastFailureNotifyAt = now;
+      await this.showNotification(event.sessionRef, this.titleForSession(event.sessionRef), `运行失败：${reason}`);
       return;
     }
 

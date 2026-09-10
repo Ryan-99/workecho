@@ -12,6 +12,10 @@ export function summarizeRunError(raw: string): string {
   if (unknownModel?.[1]) {
     return `模型不可用（${unknownModel[1].replace(/[.,]$/, "")}），请切换模型后重试`;
   }
+  // 余额/欠费类错误常伴随 403——必须在认证分支之前判定，否则误报"认证失效"
+  if (/insufficient|balance|quota|arrear|余额|欠费|充值/i.test(m)) {
+    return "账户余额不足或额度受限，请到服务商控制台检查";
+  }
   if (/auth_unavailable|no auth available|refresh token|unauthorized|No API key|\b401\b|\b403\b/i.test(m)) {
     return "认证失效或未配置，请到设置中检查该 Provider 的认证";
   }
@@ -20,7 +24,7 @@ export function summarizeRunError(raw: string): string {
   if (code === "429") return "请求过于频繁（429），请稍后重试";
   if (code === "404") return "接口或模型不存在（404），请检查配置";
   if (code && Number(code) >= 500) return `服务暂时不可用（${code}），请稍后重试`;
-  if (/timeout|aborted|ENOTFOUND|ECONNREFUSED|fetch failed|network|Service Unavailable/i.test(m)) {
+  if (/timeout|aborted|connection error|connection refused|ENOTFOUND|ECONNREFUSED|ECONNRESET|fetch failed|network|Service Unavailable/i.test(m)) {
     return "网络或服务异常，请稍后重试";
   }
   return truncateLine(m.split("\n")[0] ?? m, 60);

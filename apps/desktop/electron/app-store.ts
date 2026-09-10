@@ -2256,10 +2256,8 @@ export class DesktopAppStore implements AppStoreInternals {
           }
           break;
         case "runFailed":
-          this.state = {
-            ...this.state,
-            lastError: event.error.message,
-          };
+          // 运行失败的原始报错由时间线错误块展示（applyTimelineEvent 下方入栈），
+          // 这里不再写进 lastError —— 否则同一份错误 JSON 会在错误块下面再裸露一遍
           await this.refreshSessionCommands(event.sessionRef);
           break;
         case "extensionCompatibilityIssue":
@@ -2811,12 +2809,20 @@ export class DesktopAppStore implements AppStoreInternals {
     return this.emit();
   }
 
-  async withSessionError(sessionRef: SessionRef, error: unknown): Promise<DesktopAppState> {
+  /** silent: 仍记录到 sessionErrorsBySession（子线程交付状态等依赖它），
+   *  但不写 lastError——运行失败的原始报错已由时间线错误块展示，避免二次裸露 */
+  async withSessionError(
+    sessionRef: SessionRef,
+    error: unknown,
+    options?: { readonly silent?: boolean },
+  ): Promise<DesktopAppState> {
     const message = describeStoreError(error);
     this.sessionState.sessionErrorsBySession.set(sessionKey(sessionRef), message);
     this.state = {
       ...this.state,
-      lastError: this.isSelectedSession(sessionRef) ? message : this.state.lastError,
+      ...(options?.silent
+        ? {}
+        : { lastError: this.isSelectedSession(sessionRef) ? message : this.state.lastError }),
       revision: this.state.revision + 1,
     };
     await this.persistUiState();

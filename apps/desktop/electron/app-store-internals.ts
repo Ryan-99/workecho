@@ -50,7 +50,7 @@ export interface AppStoreInternals {
   allocateComposerDraftSyncNonce(baseNonce?: number): number;
   emit(): DesktopAppState;
   withError(error: unknown): Promise<DesktopAppState>;
-  withSessionError(sessionRef: SessionRef, error: unknown): Promise<DesktopAppState>;
+  withSessionError(sessionRef: SessionRef, error: unknown, options?: { readonly silent?: boolean }): Promise<DesktopAppState>;
   withErrorHandling(fn: () => Promise<DesktopAppState>): Promise<DesktopAppState>;
   selectSessionFast(target: WorkspaceSessionTarget): Promise<DesktopAppState>;
   createSession(input: CreateSessionInput): Promise<DesktopAppState>;

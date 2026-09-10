@@ -205,6 +205,29 @@ test("custom provider edit + responses chat + archive delete + session groups", 
       )
       .toEqual(JSON.stringify({ modelId: "mock-chat-v2", lastError: null, preview: "你好，这是 responses 回复。" }));
 
+    /* ── 运行失败只出错误块：原始报错不再二次裸露（lastError 气泡）── */
+    // 关掉 mock 中转 → 发送必然连接失败。错误只应出现在时间线错误块（简短原因
+    // + 重试），不得再把整段原始报错写进 lastError 渲染成第二个气泡
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    // 等上一轮回复彻底收尾（status 回到 idle）再发——否则消息会进队列而不是立即发送
+    await expect
+      .poll(async () => {
+        const state = await getDesktopState(window);
+        const session = state.workspaces.find((entry) => entry.id === workspace.id)
+          ?.sessions.find((entry) => entry.id === state.selectedSessionId);
+        return session?.status ?? "unknown";
+      }, { timeout: 30_000 })
+      .toBe("idle");
+    await window.evaluate(async () => {
+      await (window as any).piApp.submitComposer("这条会失败");
+    });
+    await expect(window.locator(".timeline-error-run")).toBeVisible({ timeout: 90_000 });
+    await expect(window.locator(".timeline-error-run__label")).toContainText("网络或服务异常");
+    await expect(window.locator(".timeline-error-run__retry")).toBeVisible();
+    await expect(window.locator(".error-bubble")).toHaveCount(0);
+    const failedState = await getDesktopState(window);
+    expect(failedState.lastError ?? null).toBeNull();
+
     /* ── 分组：组内新建 + 拖拽换组 ── */
     await window.locator(".group-add-btn").click();
     await window.locator(".group-name-input").fill("项目A");

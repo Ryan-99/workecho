@@ -34,6 +34,18 @@ test("summarizeRunError covers rate limits, missing routes, and network failures
   expect(summarizeRunError("fetch failed ENOTFOUND api.example.com")).toBe("网络或服务异常，请稍后重试");
 });
 
+test("summarizeRunError diagnoses balance errors before the generic 403 auth branch", () => {
+  // 真实场景：403 + Insufficient account balance 被误报成"认证失效"
+  expect(
+    summarizeRunError(
+      'OpenAI API error (403): {"message":"Insufficient account balance. Please check your account and recharge."}',
+    ),
+  ).toBe("账户余额不足或额度受限，请到服务商控制台检查");
+  expect(summarizeRunError("402: {\"error\":{\"code\":\"quota_exceeded\"}}")).toBe(
+    "账户余额不足或额度受限，请到服务商控制台检查",
+  );
+});
+
 test("summarizeRunError truncates unrecognized errors to one line", () => {
   const summary = summarizeRunError(`weird failure\nsecond line {"json": true}`);
   expect(summary).toBe("weird failure");
