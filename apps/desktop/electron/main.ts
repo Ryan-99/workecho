@@ -1554,7 +1554,7 @@ app.whenReady().then(async () => {
     if (!stat && !existsSync(path.dirname(workspacePath))) {
       throw new Error(`工作目录的父路径不存在: ${workspacePath}`);
     }
-    initWorkspaceDir(workspacePath);  // 确保 workbench 子目录存在（幂等）
+    initWorkspaceDir(workspacePath, { markInitialized: false });  // 确保目录结构存在；sentinel 由 onboarding:finish 写入
     const prompt = readBusinessPrompt(configuredUserDataDir);
     syncPromptToWorkspace(workspacePath, prompt);
     // 把这个 workspace 注册到 store（如果还没有）—— 防护 store 未就绪
@@ -2084,6 +2084,12 @@ app.whenReady().then(async () => {
     mkdirSync(defaultWorkspacePath, { recursive: true });
     const sentinel = path.join(defaultWorkspacePath, ".init-scan-done");
     writeFileSync(sentinel, new Date().toISOString(), "utf-8");
+    // 引导真正完成才写"已初始化"标记：confirm-workspace 不再提前写，
+    // 避免中途退出/重载的客户端被误判为已引导（needs-onboarding 读这里）
+    const initSentinel = path.join(defaultWorkspacePath, ".workbench-initialized");
+    if (!existsSync(initSentinel)) {
+      writeFileSync(initSentinel, new Date().toISOString(), "utf-8");
+    }
     // 通知渲染层：业务数据已就绪，立即刷新状态面板
     if (mainWindow) {
       mainWindow.webContents.send("workbench:data-refreshed");
@@ -2351,7 +2357,12 @@ app.whenReady().then(async () => {
     await shell.openPath(path.dirname(resolved));
   });
   ipcMain.handle(desktopIpc.cancelCurrentRun, (event) =>
-    runWindowScopedForEvent(event, () => store.cancelCurrentRun()),
+    // 停止键绝不能进全局 window-scoped 串行队列：submitComposer 持有该队列直到
+    // 整个模型运行结束（await session.prompt），入队意味着"停止"要排队到运行
+    // 自然结束才执行（表现为点停止没反应、回复照常泄漏）。这里绕开队列立即执行。
+    runImmediateStateResultForWindow(BrowserWindow.fromWebContents(event.sender), () =>
+      store.cancelCurrentRun(),
+    )
   );
   ipcMain.handle(desktopIpc.pickComposerAttachments, async (event) => {
     const window = resolveDialogWindow(BrowserWindow.fromWebContents(event.sender));

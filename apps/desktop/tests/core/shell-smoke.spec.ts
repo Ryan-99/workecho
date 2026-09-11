@@ -104,8 +104,8 @@ test("wiki page opens from the sidebar and plan-mode toggle reflects in the comp
     await expect(window.locator(".wiki-tree")).toBeVisible();
     await window.locator(".wiki-page-actions button", { hasText: "图谱" }).click();
     await expect(window.locator(".wiki-page-actions button", { hasText: "图谱" })).toHaveClass(/active/);
-    // 关闭按钮回到聊天面板
-    await window.locator(".wiki-page-actions button", { hasText: "关闭" }).click();
+    // 知识库页无关闭按钮（侧栏互斥切换规范）：点会话回聊天面板
+    await window.locator(".session-item", { hasText: "Plan mode thread" }).click();
     await expect(window.locator(".chat-panel")).toBeVisible({ timeout: 20_000 });
 
     // C-08：计划模式开关（+ 菜单内）切换后 placeholder 变化 + 徽标出现

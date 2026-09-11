@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { appConfirm } from "./app-dialog";
+import { appConfirm, appPrompt } from "./app-dialog";
 import {
   Plus, Trash2, Archive, Settings as SettingsIcon, Pin,
-  ChevronRight, ChevronDown, FolderPlus, Folder, X, Clock, BookOpen } from "lucide-react";
+  ChevronRight, ChevronDown, FolderPlus, Folder, X, Clock, BookOpen, Pencil } from "lucide-react";
 import type { SessionRecord, OrchestrationChildThread } from "../desktop-state";
 
 interface SessionGroup {
@@ -264,6 +264,22 @@ export function Sidebar({
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
+          <button
+            className="ctx-menu-item"
+            onClick={async () => {
+              const sid = contextMenu.sessionId;
+              setContextMenu(null);
+              const current = sessions.find((x) => x.id === sid)?.title ?? "";
+              const result = await appPrompt("重命名会话", { defaultValue: current });
+              const trimmed = (result.value ?? "").trim();
+              if (!trimmed) return;
+              try {
+                await api.piApp.renameSession({ workspaceId, sessionId: sid }, trimmed);
+              } catch { /* 主进程 emit 会刷新状态；失败静默 */ }
+            }}
+          >
+            <Pencil size={11} /> 重命名
+          </button>
           <div className="ctx-menu-label">移动到分组</div>
           {orderedGroups.map((g) => (
             <button

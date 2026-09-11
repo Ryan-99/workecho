@@ -4,6 +4,10 @@ import { workechoNotificationIcon } from "./brand-notification";
 const RELEASES_URL =
   "https://api.github.com/repos/Ryan-99/workecho/releases?per_page=1";
 const RELEASES_PAGE = "https://github.com/Ryan-99/workecho/releases";
+// api.github.com 匿名限额按出口 IP 共享，代理场景极易 403/429。
+// 命中限流时回退到 releases/latest 的 302 重定向解析真实版本号。
+const RELEASES_LATEST_URL = "https://github.com/Ryan-99/workecho/releases/latest";
+const RELEASES_ATOM_URL = "https://github.com/Ryan-99/workecho/releases.atom";
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const INITIAL_DELAY_MS = 15_000; // 15 seconds after launch
@@ -61,6 +65,50 @@ export function showUpdateNotification(
 }
 
 /**
+ * releases.atom 走 github.com 网页域（不受 api.github.com 匿名限流影响），
+ * 且包含 prerelease——beta 仓没有正式 release，releases/latest 解析不到 tag，
+ * 只有 feed 能给出真实最新版本。取第一条 entry 的 /releases/tag/<tag>。
+ */
+async function resolveLatestViaAtom(): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await net.fetch(RELEASES_ATOM_URL, { signal: controller.signal });
+      if (!res.ok) return null;
+      const xml = await res.text();
+      const match = xml.match(/<entry>[\s\S]*?<link[^>]+href="[^"]*\/releases\/tag\/(v?[0-9A-Za-z.+-]+)"/);
+      return match?.[1] ?? null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * releases/latest 对已发布版本 302 到 /releases/tag/<tag>。
+ * 解析最终 URL 提取版本号，绕开 api.github.com 的匿名限流。
+ */
+async function resolveLatestViaRedirect(): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await net.fetch(RELEASES_LATEST_URL, { signal: controller.signal });
+      const finalUrl = res.url || RELEASES_LATEST_URL;
+      const match = finalUrl.match(/\/releases\/tag\/(v?[0-9A-Za-z.+-]+)\/?$/);
+      return match?.[1] ?? null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Pure update check — performs the network request and version comparison but
  * never shows UI. Callers decide how to surface the result (auto path shows a
  * deduped notification, the manual menu path shows a dialog).
@@ -87,6 +135,14 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
   }
 
   if (!res.ok) {
+    // 403/429 = 匿名 API 限流，改走 github.com 网页端兜底（无限流）：
+    // 先解析 releases.atom（含 prerelease，beta 仓必需），再退 latest 重定向
+    if (res.status === 403 || res.status === 429) {
+      const fallbackTag = (await resolveLatestViaAtom()) ?? (await resolveLatestViaRedirect());
+      if (fallbackTag) {
+        return compareReleaseVersions(fallbackTag);
+      }
+    }
     return {
       status: "error",
       message: `GitHub Releases returned ${res.status}.`,
@@ -108,7 +164,12 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
     };
   }
 
-  const latest = release.tag_name.replace(/^v/, "");
+  return compareReleaseVersions(release.tag_name, release.html_url);
+}
+
+/** 版本比较收敛为单一入口：API 路径与限流兜底路径共用同一套判定。 */
+function compareReleaseVersions(rawTag: string, htmlUrl?: string): UpdateCheckResult {
+  const latest = rawTag.replace(/^v/, "");
   const current = app.getVersion();
 
   // Only an actually newer published version counts as an update — a proper
@@ -118,7 +179,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
       status: "update-available",
       currentVersion: current,
       latestVersion: latest,
-      releaseUrl: releaseUrlFor(release),
+      releaseUrl: htmlUrl ?? `${RELEASES_PAGE}/tag/${rawTag}`,
     };
   }
 

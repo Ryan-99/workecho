@@ -43,14 +43,19 @@ export function ensureDefaultWorkspace(userDataDir: string): string {
  *
  * workspaceDir 本身就是 workspace 根目录（不是 userData）。
  */
-export function initWorkspaceDir(workspaceDir: string): void {
+export function initWorkspaceDir(workspaceDir: string, options: { markInitialized?: boolean } = {}): void {
   // Wiki 统一架构初始化（所有操作幂等，每次启动安全运行）
   ensureWikiStructure(workspaceDir);
   migrateLegacyData(workspaceDir);
   seedWikiDefaults(workspaceDir);
   ensureScheduleFile(workspaceDir);
 
-  // sentinel 仅标记"首次初始化已完成"（供其他逻辑判断，如是否弹引导）
+  // sentinel 仅标记"首次初始化已完成"（供其他逻辑判断，如是否弹引导）。
+  // markInitialized=false 供引导页中间步骤使用：此时引导尚未走完，
+  // 提前写 sentinel 会让中途重载/重启的客户端被误判为"已引导"而跳过剩余步骤。
+  if (options.markInitialized === false) {
+    return;
+  }
   const sentinel = path.join(workspaceDir, ".workbench-initialized");
   if (!existsSync(sentinel)) {
     writeFileSync(sentinel, new Date().toISOString(), "utf-8");

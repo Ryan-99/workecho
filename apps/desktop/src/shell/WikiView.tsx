@@ -135,7 +135,7 @@ export function WikiView({ onClose }: { onClose?: () => void }) {
             <Share2 size={12} /> 图谱
           </button>
           <button onClick={load} title="刷新"><RefreshCw size={12} /></button>
-          {onClose && <button onClick={onClose} title="关闭知识库"><X size={12} /> 关闭</button>}
+
         </div>
       </div>
 

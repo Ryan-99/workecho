@@ -2475,38 +2475,38 @@ function treeNodeTitle(entry: SessionTreeNodeRecord["entry"]): string {
     case "message":
       switch (entry.message.role) {
         case "user":
-          return "User";
+          return "用户";
         case "assistant":
-          return "Assistant";
+          return "助手";
         case "toolResult":
-          return "Tool result";
+          return "工具结果";
         case "bashExecution":
-          return "Shell";
+          return "终端";
         case "branchSummary":
-          return "Branch summary";
+          return "分支摘要";
         case "compactionSummary":
-          return "Compaction";
+          return "上下文压缩";
         default:
           return entry.message.role;
       }
     case "custom_message":
       return entry.customType;
     case "compaction":
-      return "Compaction";
+      return "上下文压缩";
     case "branch_summary":
-      return "Branch summary";
+      return "分支摘要";
     case "model_change":
-      return "Model";
+      return "切换模型";
     case "thinking_level_change":
-      return "Thinking";
+      return "思考级别";
     case "custom":
-      return "Custom";
+      return "自定义";
     case "label":
-      return "Label";
+      return "标签";
     case "session_info":
-      return "Title";
+      return "会话标题";
   }
-  return "Entry";
+  return "节点";
 }
 
 function treeNodePreview(
