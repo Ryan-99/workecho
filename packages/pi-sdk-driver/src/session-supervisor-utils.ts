@@ -148,6 +148,8 @@ export function extractPreview(message: unknown): string | undefined {
 
 export function determineRunOutcome(messages: readonly unknown[]): {
   success: boolean;
+  /** 用户主动中止（stopReason "aborted"）：不是失败，UI 按空闲处理 */
+  aborted?: boolean;
   error?: SessionErrorInfo;
 } {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -166,6 +168,7 @@ export function determineRunOutcome(messages: readonly unknown[]): {
             : "Run failed";
       return {
         success: false,
+        aborted: stopReason === "aborted",
         error: {
           message: messageText,
           code: stopReason.toUpperCase(),

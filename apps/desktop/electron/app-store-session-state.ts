@@ -94,7 +94,8 @@ function statusForEvent(sessionStatus: SessionRecord["status"], event: SessionDr
     case "runCompleted":
       return event.snapshot.status;
     case "runFailed":
-      return "failed";
+      // 用户主动停止（ABORTED）不是失败：会话回到 idle（driver 侧同样按 idle 落状态）
+      return event.error.code === "ABORTED" ? "idle" : "failed";
     case "sessionClosed":
       return "idle";
     default:

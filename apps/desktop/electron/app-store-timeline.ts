@@ -219,6 +219,17 @@ export function applyTimelineEvent(
     }
     case "runFailed": {
       const metrics = currentMetrics;
+      // 用户主动停止（ABORTED）不是失败：中性 "Stopped" 活动条，不进错误分级
+      if (event.error.code === "ABORTED") {
+        clearRunState(transcript, key, event.sessionRef, state);
+        transcript.push(
+          makeActivityItem("Stopped", {
+            tone: "neutral",
+            metadata: metrics ? workedForLabel(metrics.startedAt, event.timestamp) : undefined,
+          }),
+        );
+        break;
+      }
       const latestToolError = metrics ? latestErrorToolDetail(transcript, metrics.startedAt) : undefined;
       const failureLabel = clearerRunFailureLabel(event.error.message, latestToolError);
       const failureDetail = event.error.code;

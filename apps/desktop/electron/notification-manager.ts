@@ -143,6 +143,10 @@ export class NotificationManager {
     }
 
     if (event.type === "runFailed") {
+      // 用户主动停止不是失败，不弹通知
+      if (event.error.code === "ABORTED") {
+        return;
+      }
       // pi 自动重试失败会连发多个 runFailed——同会话同原因 2 分钟内只弹一次，
       // 且正文用简短摘要，不把整段原始错误 JSON 塞进系统通知
       const { label: reason } = summarizeRunError(event.error.message);

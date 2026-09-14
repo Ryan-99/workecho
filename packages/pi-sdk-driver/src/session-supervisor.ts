@@ -152,6 +152,14 @@ interface ManagedSessionRecord {
   leasePath: string | undefined;
   /** mtime (epoch ms) of the JSONL last reconciled into the served transcript. */
   transcriptDiskMtimeMs: number | undefined;
+  /**
+   * sendUserMessage 已把 UI 置为 running、但 session.prompt() 尚未走完前置流程
+   * （扩展拦截/鉴权检查/模板展开）的窗口标记。窗口内 pi 的 abort() 是静默
+   * 空操作（activeRun 未建立），cancelCurrentRun 需据此补一次延迟 abort。
+   */
+  pendingPromptRun: boolean;
+  /** 每次 sendUserMessage 递增；延迟 abort 用它识别"换代的新发送"以免误杀。 */
+  sendGeneration: number;
 }
 
 interface RegisteredCommandAdapter {
@@ -732,6 +740,12 @@ export class SessionSupervisor {
     const runId = isQueuedMessage || isExtensionCommand ? undefined : crypto.randomUUID();
     record.runningRunId = runId ?? record.runningRunId;
     record.status = isQueuedMessage || isExtensionCommand ? record.status : "running";
+    if (!isQueuedMessage && !isExtensionCommand) {
+      // 从这里到 pi 真正建立 activeRun 之间是 cancelCurrentRun 的竞态窗口（见
+      // pendingPromptRun 注释），先标记并换代。
+      record.sendGeneration += 1;
+      record.pendingPromptRun = true;
+    }
     record.updatedAt = nowIso();
     record.config = deriveSessionConfig(session.sessionManager);
     record.preview = truncate(input.text);
@@ -836,6 +850,8 @@ export class SessionSupervisor {
         Object.assign(error, { workechoRunFailure: true });
       }
       throw error;
+    } finally {
+      record.pendingPromptRun = false;
     }
   }
 
@@ -864,24 +880,30 @@ export class SessionSupervisor {
     await this.emit(record, sessionUpdatedEvent(record));
   }
 
+  /** abort 竞态窗口的兜底轮询间隔：prompt 前置流程冷启动可达数秒。 */
+  static readonly CANCEL_RACE_POLL_MS = 50;
+
   async cancelCurrentRun(sessionRef: SessionRef): Promise<void> {
     const record = this.records.get(sessionKey(sessionRef));
     if (!record?.session) {
-      console.warn(`[cancel-diag] no record/session for ${sessionKey(sessionRef)}; keys=${[...this.records.keys()].join(",")}`);
       return;
     }
 
     try {
-      // 诊断:abort 前后 session 状态
-      const before = (record.session as unknown as { isIdle?: boolean }).isIdle;
-      console.warn(`[cancel-diag] aborting ${sessionKey(sessionRef)} isIdle=${String(before)}`);
       await record.session.abort();
-      const after = (record.session as unknown as { isIdle?: boolean }).isIdle;
-      console.warn(`[cancel-diag] aborted isIdle=${String(after)}`);
     } catch (error) {
       // Abort is best-effort. Even if the runtime reports a failure we still
       // reset local run state below so the UI does not stay stuck on "running".
       console.warn(`[pi-sdk-driver] abort failed for ${sessionKey(record.ref)}:`, error);
+    }
+
+    // 竞态收尾：cancel 时 pi 仍 idle 但有待起跑的 prompt（sendUserMessage 已把
+    // UI 置为 running、prompt() 还在扩展拦截/鉴权检查等前置流程里），说明刚才的
+    // abort() 落在 activeRun 建立之前、是静默空操作——不补刀的话，运行稍后照常
+    // 启动并把回复流进时间线（"点了停止却还在泄漏"）。轮询等 run 一启动立即
+    // abort；换代的新发送或 prompt 中途返回则放弃。
+    if (record.session.isIdle && record.pendingPromptRun) {
+      void this.abortOnceRunStarts(record);
     }
 
     // Aborting ends the current turn, so any steer/follow-up messages queued
@@ -894,6 +916,25 @@ export class SessionSupervisor {
     record.status = "idle";
     await this.persistSnapshot(record);
     await this.emit(record, sessionUpdatedEvent(record));
+  }
+
+  private async abortOnceRunStarts(record: ManagedSessionRecord): Promise<void> {
+    const session = record.session;
+    const generation = record.sendGeneration;
+    while (record.pendingPromptRun && record.session === session && record.sendGeneration === generation) {
+      await new Promise((resolve) => setTimeout(resolve, SessionSupervisor.CANCEL_RACE_POLL_MS));
+      if (!record.session || record.session !== session || record.sendGeneration !== generation) {
+        return;
+      }
+      if (!session.isIdle) {
+        try {
+          await session.abort();
+        } catch (error) {
+          console.warn(`[pi-sdk-driver] race abort failed for ${sessionKey(record.ref)}:`, error);
+        }
+        return;
+      }
+    }
   }
 
   async setSessionModel(sessionRef: SessionRef, selection: SessionModelSelection): Promise<void> {
@@ -1154,6 +1195,8 @@ export class SessionSupervisor {
       sessionCommands: [],
       leasePath: undefined,
       transcriptDiskMtimeMs: undefined,
+      pendingPromptRun: false,
+      sendGeneration: 0,
     };
     return record;
   }
@@ -2017,9 +2060,11 @@ export class SessionSupervisor {
         const outcome = determineRunOutcome(event.messages);
         const runId = record.runningRunId;
         record.runningRunId = undefined;
-        record.status = outcome.success ? "idle" : "failed";
+        // 用户主动中止不是失败：会话回到 idle（runFailed 仍会发出、带 ABORTED
+        // 码，时间线/通知按此区分），否则停止后的会话在列表里显示为失败态。
+        record.status = outcome.success || outcome.aborted ? "idle" : "failed";
         record.updatedAt = timestamp;
-        if (!outcome.success && outcome.error) {
+        if (!outcome.success && !outcome.aborted && outcome.error) {
           record.preview = outcome.error.message;
         }
         if (record.session) {
