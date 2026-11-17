@@ -14,10 +14,15 @@
  * - tool_call 事件否决：handler 返回 { block: true, reason }
  * - ExtensionContext.cwd（workspace 路径，缺失回退 process.cwd）
  */
-import type { AgentToolResult, ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentToolResult,
+  ExtensionContext,
+  ExtensionFactory,
+  ExtensionToolContext,
+} from "@earendil-works/pi-coding-agent";
 
 /* 类型再导出：业务代码的引用点统一为 ./pi-compat */
-export type { AgentToolResult, ExtensionContext, ExtensionFactory };
+export type { AgentToolResult, ExtensionContext, ExtensionFactory, ExtensionToolContext };
 
 /** 我们订阅的 pi 事件（升级时逐一核对事件名与载荷结构） */
 export const PI_EVENTS = {
@@ -44,7 +49,7 @@ export interface PiToolDefinition {
     params: any,
     signal: AbortSignal | undefined,
     onUpdate: any,
-    ctx: ExtensionContext,
+    ctx: ExtensionToolContext,
   ) => Promise<AgentToolResult<unknown>>;
 }
 
@@ -68,8 +73,8 @@ export function toolErr(message: string): AgentToolResult<unknown> {
   return { content: [{ type: "text", text: message }], details: undefined };
 }
 
-/** 从 ExtensionContext 取 cwd（workspace 路径）；上游未提供时回退 process.cwd */
-export function cwdFromContext(ctx: ExtensionContext | undefined): string {
+/** 从 ExtensionContext / ExtensionToolContext 取 cwd（workspace 路径）；上游未提供时回退 process.cwd */
+export function cwdFromContext(ctx: ExtensionContext | ExtensionToolContext | undefined): string {
   return (ctx as any)?.cwd ?? process.cwd();
 }
 

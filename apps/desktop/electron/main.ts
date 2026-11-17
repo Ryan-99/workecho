@@ -15,7 +15,7 @@ import {
 } from "electron";
 import { isValidHttpBaseUrl } from "@pi-gui/pi-sdk-driver";
 import { createHash, randomUUID } from "node:crypto";
-import type { AgentToolResult, ExtensionContext } from "./pi-compat";
+import type { AgentToolResult, ExtensionContext, ExtensionToolContext } from "./pi-compat";
 import { readFile, stat } from "node:fs/promises";
 import { existsSync, writeFileSync, readFileSync, readdirSync, unlinkSync, appendFileSync, statSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -207,7 +207,7 @@ async function runOrchestrationRuntimeToolForTest(
   );
 }
 
-function createTestExtensionContext(sessionRef: SessionRef): ExtensionContext {
+function createTestExtensionContext(sessionRef: SessionRef): ExtensionToolContext {
   const workspace = store.state.workspaces.find(
     (entry) => entry.id === sessionRef.workspaceId && entry.sessions.some((session) => session.id === sessionRef.sessionId),
   );
@@ -236,7 +236,12 @@ function createTestExtensionContext(sessionRef: SessionRef): ExtensionContext {
     getContextUsage: () => undefined,
     compact: () => undefined,
     getSystemPrompt: () => "",
-  };
+    // pi 1.x：工具 execute 收到 ExtensionToolContext（含 tools / executeTool）
+    tools: [],
+    executeTool: async () => {
+      throw new Error("nested tool calls unsupported in test context");
+    },
+  } as unknown as ExtensionToolContext;
 }
 /* ============ MCP 配置信任链辅助（安全审核 F-29/MCP-1） ============ */
 
