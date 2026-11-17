@@ -36,7 +36,7 @@ function makeMockPi() {
 }
 
 /* C1: 版本带 */
-test("C1 上游 pi-coding-agent 版本在预期带内（0.x，记录当前版本）", () => {
+test("C1 上游 pi-coding-agent 版本在预期带内（1.x，记录当前版本）", () => {
   // ESM-only 包：用 import.meta.resolve 定位入口，向上找包根的 package.json
   const entry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
   let dir = entry;
@@ -47,8 +47,8 @@ test("C1 上游 pi-coding-agent 版本在预期带内（0.x，记录当前版本
       if (candidate.name === "@earendil-works/pi-coding-agent") {
         const major = Number(candidate.version.split(".")[0]);
         console.log(`[pi-contract] 上游版本: ${candidate.version}`);
-        // 0.x 阶段 minor 即破坏性升级：进入 1.x 需要全面复核 pi-compat.ts
-        assert.equal(major, 0, `上游进入 ${major}.x，需要全面复核 pi-compat.ts`);
+        // 1.x：minor 仍可能破坏性；升级需跑完整契约 + 回归。进入 2.x 再触发全面复核。
+        assert.equal(major, 1, `上游进入 ${major}.x，需要全面复核 pi-compat.ts`);
         return;
       }
     } catch { /* 继续向上找 */ }

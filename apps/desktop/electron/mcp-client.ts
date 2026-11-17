@@ -110,8 +110,21 @@ class McpConnection {
     this.proc.stderr?.on("data", (chunk) => {
       console.warn(`[mcp] stderr:`, chunk.toString().trim());
     });
-    this.proc.on("error", (e) => console.error(`[mcp] 进程错误:`, e.message));
-    this.proc.on("exit", (code) => console.warn(`[mcp] 进程退出 code=${code}`));
+    this.proc.on("error", (e) => {
+      console.error(`[mcp] 进程错误:`, e.message);
+      this.rejectAllPending(e);
+    });
+    this.proc.on("exit", (code) => {
+      console.warn(`[mcp] 进程退出 code=${code}`);
+      this.rejectAllPending(new Error(`MCP 进程退出 code=${code}`));
+    });
+  }
+
+  private rejectAllPending(error: Error) {
+    for (const [id, { reject }] of this.pending) {
+      reject(error);
+      this.pending.delete(id);
+    }
   }
 
   private processBuffer() {
@@ -189,8 +202,14 @@ export async function createMcpExtension(agentDir: string): Promise<ExtensionFac
   for (const name of serverNames) {
     const config = configs[name];
     if (!config) continue;
+    // 空 env 值通常是未注入的密钥占位；启动只会空等超时。
+    if (config.env && Object.values(config.env).some((v) => typeof v !== "string" || v.length === 0)) {
+      console.warn(`[mcp] 跳过 ${name}：配置含空环境变量`);
+      continue;
+    }
+    let conn: McpConnection | undefined;
     try {
-      const conn = new McpConnection(config);
+      conn = new McpConnection(config);
       await conn.initialize();
       const tools = await conn.listTools();
       console.log(`[mcp] ${name}: 发现 ${tools.length} 个工具`);
@@ -200,6 +219,7 @@ export async function createMcpExtension(agentDir: string): Promise<ExtensionFac
       connections.push(conn);
     } catch (e) {
       console.warn(`[mcp] 启动 ${name} 失败:`, (e as Error).message);
+      conn?.dispose();
     }
   }
 

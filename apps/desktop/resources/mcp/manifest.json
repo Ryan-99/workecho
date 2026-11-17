@@ -1,0 +1,20 @@
+{
+  "servers": [
+    {
+      "id": "channel-ops",
+      "dirname": "channel-ops",
+      "command": "node",
+      "args": ["${MCP_ROOT}/server.mjs"],
+      "env": {
+        "CHANNEL_OPS_MCP_TOKEN": "${CHANNEL_OPS_MCP_TOKEN}",
+        "CHANNEL_OPS_MCP_URL": "${CHANNEL_OPS_MCP_URL}"
+      }
+    },
+    {
+      "id": "sangfor",
+      "dirname": "sangfor-mcp",
+      "command": "node",
+      "args": ["${MCP_ROOT}/server.mjs"]
+    }
+  ]
+}

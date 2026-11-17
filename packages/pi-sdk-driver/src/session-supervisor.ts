@@ -2546,6 +2546,10 @@ function treeNodeTitle(entry: SessionTreeNodeRecord["entry"]): string {
       return "思考级别";
     case "custom":
       return "自定义";
+    case "context_edit":
+      return "上下文编辑";
+    case "usage":
+      return "用量";
     case "label":
       return "标签";
     case "session_info":
@@ -2573,11 +2577,15 @@ function treeNodePreview(
       return entry.thinkingLevel;
     case "custom":
       return entry.customType;
+    case "context_edit":
+      return entry.replacement === null ? "(omitted from context)" : `edit → ${entry.targetId}`;
+    case "usage":
+      return entry.note || `${entry.kind}: ${entry.provider}/${entry.model}`;
     case "label":
       return entry.label ?? "(cleared)";
     case "session_info":
       return entry.name || "(empty)";
-    default:
+  default:
       return undefined;
   }
 }

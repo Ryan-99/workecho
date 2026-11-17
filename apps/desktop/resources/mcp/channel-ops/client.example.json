@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "channel-ops": {
+      "command": "node",
+      "args": [
+        "D:/Codex迁移准备/项目/渠道大师/channel-ops-mcp/server.mjs"
+      ],
+      "env": {
+        "CHANNEL_OPS_MCP_URL": "https://qdyy.sangforln.cloud:1443/api/mcp/channel-ops"
+      }
+    }
+  }
+}

@@ -74,13 +74,14 @@ pnpm --dir apps/desktop run verify:packaged-runtime-deps:windows
 
 ## 版本策略
 
-- `package.json` 保持 `^0.80.6` 形式（0.x 的 caret 只允许 patch 级自动更新，
-  minor 升级必须走上面的 Runbook 人工确认）。
+- `package.json` 保持 `^1.5.2` 形式（1.x 的 caret 允许同主版本 minor/patch；
+  minor 升级仍建议走上面的 Runbook 人工确认）。进入 2.x 必须全面复核。
 - 每次升级在本文档底部追加一行变更记录。
 
 ## 变更记录
 
 | 日期 | 上游版本 | 说明 |
 |------|---------|------|
+| 2026-11-17 | 0.84.2 → 1.5.2 | 跨主版本升级。契约测试 C1 改认 1.x；session schema `CURRENT_SESSION_VERSION=3`；`SessionTreeNodeKind` 补 `usage` / `context_edit`。pi-compat / 业务层零改动；wiki 契约 + 302 单测 + pi-sdk-driver 44 测通过。上游自带 `createMcpExtension`，桌面侧仍保留自研 `mcp-client.ts`（环境白名单 + TOFU hash fail-closed）。 |
 | 2026-08-17 | 0.84.2 | 建立隔离层与契约测试（本文件） |
 | 2026-08-17 | 0.80.6 → 0.84.2 | 第一次真实升级。**Workecho 业务层零改动**（pi-compat 生效）；适配集中在 pi-gui 基座 pi-sdk-driver：AuthStorage 类移除 → ModelRuntime.create()（异步，依赖改惰性 Promise 单例）；ModelRegistry.create 静态工厂 → new ModelRegistry(runtime)；createAgentSession 的 authStorage/modelRegistry 选项 → modelRuntime；session.modelRegistry → 共享 registry；ResourceLoader 新增 getSystemPromptSource/getAppendSystemPromptSources。集成新能力：Hook 规则新增 terminate 动作（拦截并终止本轮，0.84.1）。**可跟进**：defaultTools 启动工具配置、Provider 凭据预检（ModelRuntime.checkAuth）、transcript Mermaid/LaTeX 渲染（需前端渲染器支持）、AGENTS.override.md 按目录上下文覆盖（免费获得） |

@@ -1,9 +1,9 @@
 /**
  * 运行时模型注册表校验（CI 门禁）。
- * pi 0.84.2 起 AuthStorage 导出移除、ModelRegistry 需 runtime 实参——
+ * pi 0.84+ AuthStorage 导出移除、ModelRegistry 需 runtime 实参——
  * 模型存在性改为直接校验 pi-ai 内置 provider 数据 JSON（同一数据源，
- * 无需构造运行时）。运行时 import 完整性由 assert-packaged-runtime-deps
- * 的导出面检查覆盖。
+ * 无需构造运行时）。pi-ai 1.x 的 JSON 键常带 `chat:` 等 transport 前缀。
+ * 运行时 import 完整性由 assert-packaged-runtime-deps 的导出面检查覆盖。
  */
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -27,7 +27,12 @@ for (const check of EXPECTED) {
     const json = JSON.parse(await readFile(path.join(dataDir, check.file), "utf8"));
     const ids = new Set();
     for (const apiGroup of Object.values(json)) {
-      for (const id of Object.keys(apiGroup ?? {})) ids.add(id);
+      for (const rawId of Object.keys(apiGroup ?? {})) {
+        // pi-ai 1.x：provider JSON 键常带 transport 前缀（如 chat:claude-opus-5-5）
+        ids.add(rawId);
+        const colon = rawId.indexOf(":");
+        if (colon > 0) ids.add(rawId.slice(colon + 1));
+      }
     }
     cache.set(check.file, ids);
   }
