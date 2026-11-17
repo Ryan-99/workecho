@@ -13,4 +13,5 @@ test-results
 tmp-chat-selftest.mjs
 tmp-parallel-selftest.mjs
 resources/mcp/secrets.local.json
+resources/mcp/secrets.packaged.json
 resources/mcp/**/*.zip

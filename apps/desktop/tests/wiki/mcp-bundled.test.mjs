@@ -142,3 +142,23 @@ test("readMcpLocalSecrets: 读取 secrets.local.json", () => {
     rmSync(resources, { recursive: true, force: true });
   }
 });
+
+test("readMcpLocalSecrets: local 覆盖 packaged", () => {
+  const resources = makeResources(mkdtempSync(join(tmpdir(), "mcp-res-")));
+  const mcp = join(resources, "mcp");
+  writeFileSync(
+    join(mcp, "secrets.packaged.json"),
+    JSON.stringify({ CHANNEL_OPS_MCP_TOKEN: "from-packaged", CHANNEL_OPS_MCP_URL: "https://packaged.example/mcp" }),
+  );
+  writeFileSync(
+    join(mcp, "secrets.local.json"),
+    JSON.stringify({ CHANNEL_OPS_MCP_TOKEN: "from-local" }),
+  );
+  try {
+    const secrets = readMcpLocalSecrets(resources);
+    assert.equal(secrets.CHANNEL_OPS_MCP_TOKEN, "from-local");
+    assert.equal(secrets.CHANNEL_OPS_MCP_URL, "https://packaged.example/mcp");
+  } finally {
+    rmSync(resources, { recursive: true, force: true });
+  }
+});

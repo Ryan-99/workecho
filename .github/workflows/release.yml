@@ -40,6 +40,17 @@ jobs:
         env:
           # 反馈通道注入（构建期 define 进产物；值只存 GitHub secrets，不进仓库）
           WORKECHO_FEEDBACK_WEBHOOKS: ${{ secrets.WORKECHO_FEEDBACK_WEBHOOKS }}
+      - name: Bake packaged MCP secrets (optional)
+        shell: bash
+        env:
+          CHANNEL_OPS_MCP_TOKEN: ${{ secrets.CHANNEL_OPS_MCP_TOKEN }}
+          CHANNEL_OPS_MCP_URL: ${{ secrets.CHANNEL_OPS_MCP_URL }}
+        run: |
+          if [ -z "${CHANNEL_OPS_MCP_TOKEN}" ]; then
+            echo "No CHANNEL_OPS_MCP_TOKEN secret; skipping packaged MCP secrets"
+            exit 0
+          fi
+          node apps/desktop/scripts/write-packaged-mcp-secrets.mjs
       - name: Package Windows (installer + portable)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -74,6 +85,16 @@ jobs:
       - run: pnpm --filter @workecho/desktop run build
         env:
           WORKECHO_FEEDBACK_WEBHOOKS: ${{ secrets.WORKECHO_FEEDBACK_WEBHOOKS }}
+      - name: Bake packaged MCP secrets (optional)
+        env:
+          CHANNEL_OPS_MCP_TOKEN: ${{ secrets.CHANNEL_OPS_MCP_TOKEN }}
+          CHANNEL_OPS_MCP_URL: ${{ secrets.CHANNEL_OPS_MCP_URL }}
+        run: |
+          if [ -z "${CHANNEL_OPS_MCP_TOKEN}" ]; then
+            echo "No CHANNEL_OPS_MCP_TOKEN secret; skipping packaged MCP secrets"
+            exit 0
+          fi
+          node apps/desktop/scripts/write-packaged-mcp-secrets.mjs
       - name: Package macOS (dmg + zip)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -95,9 +116,49 @@ jobs:
             apps/desktop/release/*.zip
           if-no-files-found: error
 
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @workecho/desktop run test:unit
+      - name: Verify release version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: pnpm verify:release-version --tag "$GITHUB_REF_NAME"
+      - run: pnpm typecheck
+      - run: pnpm --filter @workecho/desktop run build
+        env:
+          WORKECHO_FEEDBACK_WEBHOOKS: ${{ secrets.WORKECHO_FEEDBACK_WEBHOOKS }}
+      - name: Bake packaged MCP secrets (optional)
+        env:
+          CHANNEL_OPS_MCP_TOKEN: ${{ secrets.CHANNEL_OPS_MCP_TOKEN }}
+          CHANNEL_OPS_MCP_URL: ${{ secrets.CHANNEL_OPS_MCP_URL }}
+        run: |
+          if [ -z "${CHANNEL_OPS_MCP_TOKEN}" ]; then
+            echo "No CHANNEL_OPS_MCP_TOKEN secret; skipping packaged MCP secrets"
+            exit 0
+          fi
+          node apps/desktop/scripts/write-packaged-mcp-secrets.mjs
+      - name: Package Linux (AppImage + deb)
+        run: pnpm --filter @workecho/desktop run package:linux
+      - name: Verify packaged runtime dependencies
+        run: pnpm --dir apps/desktop run verify:packaged-runtime-deps:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workecho-linux
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-windows, build-macos]
+    needs: [build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -108,5 +169,7 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+          # tag 名含 mcp（如 v0.1.0-beta.42-mcp）时保持 draft，避免公开仓库把带密钥安装包全网可下
+          draft: ${{ contains(github.ref_name, 'mcp') }}
           # C-11：tag 含 "-"（如 v0.1.0-beta.34）视为预发布，不抢占正式 Latest
           prerelease: ${{ contains(github.ref_name, '-') }}

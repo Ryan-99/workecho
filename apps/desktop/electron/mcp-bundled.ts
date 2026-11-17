@@ -4,7 +4,8 @@
  * 布局：
  *   resources/mcp/manifest.json
  *   resources/mcp/<id>/...          # 解压后的 MCP 服务器文件
- *   resources/mcp/secrets.local.json # 可选本地密钥（gitignore，不进公开仓）
+ *   resources/mcp/secrets.local.json    # 开发机本地密钥（gitignore，不进仓/不进包）
+ *   resources/mcp/secrets.packaged.json # 可选：构建期写入并打进安装包（gitignore，不进仓）
  *
  * 启动时把内置服务器复制到 ~/.pi/agent/bundled-mcp/<id>/，并在
  * ~/.pi/agent/mcp-servers.json 中幂等合并配置（绝不覆盖用户已有同名条目）。
@@ -49,10 +50,18 @@ function readJsonFile<T>(filePath: string): T | null {
   }
 }
 
-/** 读取本地密钥文件（不存在则空对象） */
-export function readMcpLocalSecrets(resourcesDir: string): Record<string, string> {
-  const secretsPath = path.join(resourcesDir, "mcp", "secrets.local.json");
-  const raw = readJsonFile<Record<string, unknown>>(secretsPath);
+function mergeSecretMaps(...maps: Array<Readonly<Record<string, string>>>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const map of maps) {
+    for (const [k, v] of Object.entries(map)) {
+      if (typeof v === "string" && v.length > 0) out[k] = v;
+    }
+  }
+  return out;
+}
+
+function readSecretFile(filePath: string): Record<string, string> {
+  const raw = readJsonFile<Record<string, unknown>>(filePath);
   if (!raw || typeof raw !== "object") return {};
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(raw)) {
@@ -61,7 +70,19 @@ export function readMcpLocalSecrets(resourcesDir: string): Record<string, string
   return out;
 }
 
-/** 解析 ${VAR} 占位：优先 process.env，其次 secrets.local.json */
+/**
+ * 读取 MCP 密钥：process 侧由 resolveEnvTemplates 再覆盖。
+ * 优先级（后者覆盖前者）：secrets.packaged.json → secrets.local.json
+ */
+export function readMcpLocalSecrets(resourcesDir: string): Record<string, string> {
+  const mcpDir = path.join(resourcesDir, "mcp");
+  return mergeSecretMaps(
+    readSecretFile(path.join(mcpDir, "secrets.packaged.json")),
+    readSecretFile(path.join(mcpDir, "secrets.local.json")),
+  );
+}
+
+/** 解析 ${VAR} 占位：优先 process.env，其次 secrets（packaged/local） */
 export function resolveEnvTemplates(
   env: Readonly<Record<string, string>> | undefined,
   secrets: Readonly<Record<string, string>>,

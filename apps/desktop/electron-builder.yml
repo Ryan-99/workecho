@@ -22,7 +22,9 @@ extraResources:
     to: mcp
     filter:
       - "**/*"
+      # 开发机 secrets.local.json 永不进包；secrets.packaged.json 由构建机写入后可进包
       - "!secrets.local.json"
+      - "!secrets.local.json.example"
       - "!**/*.zip"
 
 asar: true

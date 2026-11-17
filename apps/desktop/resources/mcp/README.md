@@ -15,7 +15,10 @@ node apps/desktop/scripts/import-bundled-mcp-zips.mjs \
 
 ## Secrets (public-repo safe)
 
-Do **not** commit live tokens. Copy `secrets.local.json.example` → `secrets.local.json` (gitignored):
+Do **not** commit live tokens.
+
+- Dev: copy `secrets.local.json.example` → `secrets.local.json` (gitignored, never packaged).
+- Installers: build machine runs `node apps/desktop/scripts/write-packaged-mcp-secrets.mjs` to create gitignored `secrets.packaged.json`, which **is** copied into the app package.
 
 ```json
 {
