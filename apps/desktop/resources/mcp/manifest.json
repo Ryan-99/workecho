@@ -10,10 +10,10 @@
       }
     },
     {
-      "id": "sangfor-mcp",
+      "id": "sangfor",
       "dirname": "sangfor-mcp",
       "command": "node",
-      "args": ["${MCP_ROOT}/index.js"]
+      "args": ["${MCP_ROOT}/server.mjs"]
     }
   ]
 }

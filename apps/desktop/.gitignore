@@ -1,4 +1,9 @@
 node_modules
+# Bundled MCP ships its own node_modules into the app package.
+!resources/mcp/
+!resources/mcp/**
+!resources/mcp/**/node_modules/
+!resources/mcp/**/node_modules/**
 dist
 dist-electron
 .vite

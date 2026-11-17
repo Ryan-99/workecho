@@ -10,7 +10,18 @@ release-*/
 playwright-report/
 test-results/
 
-# 本地 MCP 密钥（公开仓禁止提交真实 token）
+# 内置 MCP 随包依赖必须进仓（覆盖全局 node_modules/ 与 *.js 忽略）
+!apps/desktop/resources/mcp/
+!apps/desktop/resources/mcp/**
+!apps/desktop/resources/mcp/**/node_modules/
+!apps/desktop/resources/mcp/**/node_modules/**
+!apps/desktop/resources/mcp/**/*.js
+!apps/desktop/resources/mcp/**/*.mjs
+!apps/desktop/resources/mcp/**/*.cjs
+!apps/desktop/resources/skills/sangfor-support/
+!apps/desktop/resources/skills/sangfor-support/**
+
+# 本地 MCP 密钥与 zip 源包（公开仓禁止提交；必须写在上面的 ! 规则之后）
 apps/desktop/resources/mcp/secrets.local.json
 apps/desktop/resources/mcp/**/*.zip
 

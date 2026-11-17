@@ -1,11 +1,19 @@
 # Bundled MCP packages
 
-Place extracted MCP server trees here before packaging:
+## Present
 
-- `channel-ops/` — from `channel-ops-mcp-v5.30.9.zip`
-- `sangfor-mcp/` — from `sangfor-mcp-share-20261111.zip`
+- `sangfor-mcp/` — from `sangfor-mcp-share-20261111.zip` (entry: `server.mjs`)
+- companion skill: `../skills/sangfor-support/`
 
-Then adjust `manifest.json` `command` / `args` to match each package’s real entrypoint.
+## Pending
+
+- `channel-ops/` — from `channel-ops-mcp-v5.30.9.zip` (upload still required)
+
+```bash
+node apps/desktop/scripts/import-bundled-mcp-zips.mjs \
+  --channel-ops /path/to/channel-ops-mcp-v5.30.9.zip \
+  --sangfor /path/to/sangfor-mcp-share-20261111.zip
+```
 
 ## Token (public-repo safe)
 
