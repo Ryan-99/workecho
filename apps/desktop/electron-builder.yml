@@ -101,7 +101,9 @@ portable:
   artifactName: ${productName}-${version}-${arch}-portable.${ext}
 
 toolsets:
-  appimage: "1.0.2"
+  # 1.0.2 bundles an old libm.so.6 that breaks mksquashfs on newer glibc hosts
+  # (ubuntu-latest / 25.10+). 1.0.3 is the same runtime without bundled libm.
+  appimage: "1.0.3"
 
 dmg:
   contents:
