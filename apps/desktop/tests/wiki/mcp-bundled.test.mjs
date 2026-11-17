@@ -113,6 +113,26 @@ test("installBundledMcpServers: 已有同名配置不覆盖", () => {
   }
 });
 
+test("installBundledMcpServers: 缺密钥时只复制目录不写配置", () => {
+  const resources = makeResources(mkdtempSync(join(tmpdir(), "mcp-res-")));
+  const agentDir = mkdtempSync(join(tmpdir(), "mcp-agent-"));
+  delete process.env.CHANNEL_OPS_MCP_TOKEN;
+  try {
+    const r = installBundledMcpServers(resources, agentDir);
+    assert.ok(r.installedDirs.includes("channel-ops"));
+    assert.ok(r.skippedMissingSecrets.includes("channel-ops"));
+    assert.ok(!r.configuredServers.includes("channel-ops"));
+    assert.ok(r.configuredServers.includes("sangfor-mcp"));
+    assert.ok(existsSync(join(agentDir, "bundled-mcp", "channel-ops", "index.js")));
+    const cfg = JSON.parse(readFileSync(join(agentDir, "mcp-servers.json"), "utf-8"));
+    assert.equal(cfg["channel-ops"], undefined);
+    assert.ok(cfg["sangfor-mcp"]);
+  } finally {
+    rmSync(resources, { recursive: true, force: true });
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("readMcpLocalSecrets: 读取 secrets.local.json", () => {
   const resources = makeResources(mkdtempSync(join(tmpdir(), "mcp-res-")), { withSecrets: true });
   try {

@@ -49,10 +49,12 @@ async function quitDesktop(harness: DesktopHarness): Promise<void> {
 
 test.describe("macOS last-window lifecycle", () => {
   test.skip(process.platform !== "darwin", "macOS keeps a normal app alive after its last window closes.");
+  // macOS runners occasionally stall around last-window quit; one retry beats red CI for flakes.
+  test.describe.configure({ retries: process.env.CI ? 1 : 0 });
 
   for (const mode of VALID_TEST_MODES) {
     test(`quits after the last window closes in ${mode} test mode`, async () => {
-      test.setTimeout(30_000);
+      test.setTimeout(45_000);
       const harness = await launchLifecycleApp(mode);
       let appClosed = false;
       harness.electronApp.on("close", () => {

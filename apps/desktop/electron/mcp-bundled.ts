@@ -37,6 +37,8 @@ export interface InstallBundledMcpResult {
   readonly installedDirs: string[];
   readonly configuredServers: string[];
   readonly skippedExisting: string[];
+  /** 目录已复制，但因 ${ENV} 未解析到非空值而未写入 mcp-servers.json */
+  readonly skippedMissingSecrets: string[];
 }
 
 function readJsonFile<T>(filePath: string): T | null {
@@ -101,6 +103,7 @@ export function installBundledMcpServers(
     installedDirs: [],
     configuredServers: [],
     skippedExisting: [],
+    skippedMissingSecrets: [],
   };
   const manifest = readBundledMcpManifest(resourcesDir);
   if (!manifest || manifest.servers.length === 0) return result;
@@ -145,6 +148,15 @@ export function installBundledMcpServers(
       a.replaceAll("${MCP_ROOT}", targetDir).replaceAll("${BUNDLED_MCP_ROOT}", targetRoot),
     );
     const env = resolveEnvTemplates(spec.env, secrets);
+    // 缺密钥时不要写入配置：createMcpExtension 会对无响应子进程空等 ~10s，
+    // 拖慢每次 Electron 启动并打爆短超时的 lifecycle 测试。
+    if (env && Object.values(env).some((v) => v.length === 0)) {
+      console.warn(
+        `[mcp-bundled] 跳过写入 ${spec.id}：缺少环境变量（请配置 secrets.local.json 或 process.env）`,
+      );
+      result.skippedMissingSecrets.push(spec.id);
+      continue;
+    }
     serversMap[spec.id] = {
       command: spec.command,
       args,
