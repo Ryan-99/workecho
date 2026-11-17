@@ -12,3 +12,5 @@ dist-electron
 test-results
 tmp-chat-selftest.mjs
 tmp-parallel-selftest.mjs
+resources/mcp/secrets.local.json
+resources/mcp/**/*.zip
