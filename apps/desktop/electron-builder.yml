@@ -18,6 +18,12 @@ extraResources:
     to: costrict
   - from: resources/skills
     to: skills
+  - from: resources/mcp
+    to: mcp
+    filter:
+      - "**/*"
+      - "!secrets.local.json"
+      - "!**/*.zip"
 
 asar: true
 asarUnpack:

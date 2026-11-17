@@ -9,6 +9,11 @@ release-*/
 .cache/
 playwright-report/
 test-results/
+
+# 本地 MCP 密钥（公开仓禁止提交真实 token）
+apps/desktop/resources/mcp/secrets.local.json
+apps/desktop/resources/mcp/**/*.zip
+
 .claude/worktrees/
 .codex/worktrees/
 .DS_Store

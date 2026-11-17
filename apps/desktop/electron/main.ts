@@ -48,6 +48,7 @@ import { ensureScheduleFile, readScheduleRules, addScheduleRule, removeScheduleR
 import { readSessionGroups, createGroup, removeGroup, assignSessionToGroup } from "./session-groups";
 import { listPlugins, removePlugin, createPlugin } from "./plugin-service";
 import { createSkill, importSkill, userSkillsRoot , installBundledSkills } from "./skill-service";
+import { installBundledMcpServers } from "./mcp-bundled";
 import { createSelfLearningService } from "./self-learning";
 import { ensureHooksFile, readHookRules, addHookRule, removeHookRule } from "./hooks-service";
 import { setProgressWindowsProvider } from "./progress-broadcaster";
@@ -1171,6 +1172,21 @@ app.setPath("userData", configuredUserDataDir);
 // 权威 userData 路径注入 wiki-config，工具门控/卡片配置等同步读取点
 // 与设置页 IPC 读写同一份文件（安全审核 F-09：此前两套路径在生产构建中分叉）
 setActiveWikiUserDataDir(configuredUserDataDir);
+// 内置 MCP：复制到 ~/.pi/agent/bundled-mcp，并幂等合并 mcp-servers.json（不覆盖用户条目）
+try {
+  const mcpAgentDirForBundled = path.join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".pi", "agent");
+  const mcpBundled = installBundledMcpServers(resourcesDir, mcpAgentDirForBundled);
+  if (mcpBundled.installedDirs.length > 0) {
+    console.log("[mcp-bundled] 已安装内置 MCP 目录:", mcpBundled.installedDirs.join(", "));
+  }
+  if (mcpBundled.configuredServers.length > 0) {
+    console.log("[mcp-bundled] 已写入 mcp-servers.json:", mcpBundled.configuredServers.join(", "));
+    // 配置由应用写入 → 刷新 TOFU 基准，避免随后被判为“应用外篡改”
+    recordMcpHash(mcpAgentDirForBundled);
+  }
+} catch (e) {
+  console.warn("[mcp-bundled] 内置 MCP 安装失败:", (e as Error).message);
+}
 // 默认 workspace 路径（userData/Workbench）。
 // 不自动创建——首次启动由引导页创建；已初始化则直接用。
 const defaultWorkspacePath = path.join(configuredUserDataDir, "Workbench");
